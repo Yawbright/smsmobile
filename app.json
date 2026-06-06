@@ -1,9 +1,10 @@
 {
   "expo": {
-    "name": "oterkpolu-mobile",
+    "name": "Oterkpolu Mobile",
     "slug": "oterkpolu-mobile",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
+    "scheme": "oterkpolu",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {

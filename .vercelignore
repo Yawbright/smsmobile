@@ -1,0 +1,9 @@
+.env
+.env.*
+!.env.example
+node_modules
+.expo
+.git
+expo-server.log
+expo-server.err.log
+npm-debug.log*

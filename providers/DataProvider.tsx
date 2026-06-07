@@ -3,7 +3,7 @@ import { createContext, PropsWithChildren, useCallback, useContext, useEffect, u
 
 import { ASSESSMENT_GROUPS, CURRENT_YEAR, GRADING_SCALE, SCORE_COMPONENTS, SUBJECTS } from "../constants/school";
 import { demoAttendance, demoScores, demoStudents } from "../lib/demoData";
-import { makeAttendanceId, makeMobileStudentId, makeScoreId, nowISO, todayISO } from "../lib/ids";
+import { makeAttendanceId, makeMobileStudentId, makeScoreId, nowISO } from "../lib/ids";
 import { DEMO_CACHE_KEY, makeDataCacheKey } from "../lib/cacheKeys";
 import { AssessmentGroup, AttendanceMark, AttendanceRecord, GradingScaleItem, PermissionKey, ScoreComponent, SessionContext, Student, StudentDraft, SubjectScore } from "../types";
 import { useSupabase } from "./SupabaseProvider";
@@ -35,7 +35,6 @@ type DataContextValue = {
   saveStudent: (draft: StudentDraft) => Promise<Student>;
   deleteStudent: (studentId: string) => Promise<void>;
   upsertAttendance: (studentId: string, date: string, mark: AttendanceMark) => Promise<void>;
-  bulkAttendance: (date: string, mark: AttendanceMark) => Promise<AttendanceRecord[]>;
   replaceAttendance: (records: AttendanceRecord[]) => Promise<void>;
   upsertScore: (studentId: string, subject: string, field: string, value: number | null) => Promise<void>;
 };
@@ -481,8 +480,8 @@ export function DataProvider({ children }: PropsWithChildren) {
     setSyncing(true);
     try {
       const pendingFlushed = await flushPendingChanges();
-      let activeSession = session;
-      let studentRes = await client
+      const activeSession = session;
+      const studentRes = await client
         .from("students")
         .select("*")
         .eq("school_id", activeSession.school_id)
@@ -492,61 +491,6 @@ export function DataProvider({ children }: PropsWithChildren) {
         .eq("is_deleted", false)
         .order("student_name");
       if (studentRes.error) throw studentRes.error;
-
-      if (!studentRes.data?.length) {
-        const fallbackByYear = await client
-          .from("students")
-          .select("*")
-          .eq("school_id", session.school_id)
-          .eq("academic_year", session.academic_year)
-          .eq("is_deleted", false)
-          .order("grade")
-          .order("section")
-          .order("student_name");
-        if (fallbackByYear.error) throw fallbackByYear.error;
-        const first = fallbackByYear.data?.[0];
-        if (first?.grade && first?.section) {
-          activeSession = { ...activeSession, grade: first.grade, section: first.section };
-          studentRes = {
-            ...fallbackByYear,
-            data: (fallbackByYear.data ?? []).filter((student: Student) => student.grade === first.grade && student.section === first.section),
-          };
-        }
-      }
-
-      if (!studentRes.data?.length) {
-        const fallbackAnyYear = await client
-          .from("students")
-          .select("*")
-          .eq("school_id", session.school_id)
-          .eq("is_deleted", false)
-          .order("academic_year", { ascending: false })
-          .order("grade")
-          .order("section")
-          .order("student_name");
-        if (fallbackAnyYear.error) throw fallbackAnyYear.error;
-        const first = fallbackAnyYear.data?.[0];
-        if (first?.academic_year && first?.grade && first?.section) {
-          activeSession = { ...activeSession, academic_year: first.academic_year, grade: first.grade, section: first.section };
-          studentRes = {
-            ...fallbackAnyYear,
-            data: (fallbackAnyYear.data ?? []).filter((student: Student) =>
-              student.academic_year === first.academic_year &&
-              student.grade === first.grade &&
-              student.section === first.section
-            ),
-          };
-        }
-      }
-
-      if (
-        activeSession.academic_year !== session.academic_year ||
-        activeSession.grade !== session.grade ||
-        activeSession.section !== session.section
-      ) {
-        setSessionState((prev) => ({ ...prev, ...activeSession }));
-        await AsyncStorage.setItem(sessionKey, JSON.stringify(activeSession));
-      }
 
       const [scoreRes, attendanceRes, settingsRes] = await Promise.all([
         client
@@ -635,7 +579,7 @@ export function DataProvider({ children }: PropsWithChildren) {
     } finally {
       setSyncing(false);
     }
-  }, [cache, client, flushPendingChanges, loadPendingChanges, session, sessionKey]);
+  }, [cache, client, flushPendingChanges, loadPendingChanges, session]);
 
   useEffect(() => {
     refresh();
@@ -819,17 +763,6 @@ export function DataProvider({ children }: PropsWithChildren) {
     [attendance, cache, client, enqueuePendingChange, removePendingChange, session, students],
   );
 
-  const bulkAttendance = useCallback(
-    async (date: string, mark: AttendanceMark) => {
-      const before = attendance;
-      for (const student of students) {
-        await upsertAttendance(student.student_id, date, mark);
-      }
-      return before;
-    },
-    [attendance, students, upsertAttendance],
-  );
-
   const replaceAttendance = useCallback(
     async (records: AttendanceRecord[]) => {
       const previousIds = new Set(records.map((record) => record.attendance_id));
@@ -973,11 +906,10 @@ export function DataProvider({ children }: PropsWithChildren) {
       saveStudent,
       deleteStudent,
       upsertAttendance,
-      bulkAttendance,
       replaceAttendance,
       upsertScore,
     }),
-    [assessmentGroups, attendance, attendanceTermStartDates, bulkAttendance, classRemarks, conductOptions, deleteStudent, departmentOptions, gradingScale, headRemarks, houseOptions, isOnline, isSyncing, lastSyncError, lastSyncedAt, refresh, replaceAttendance, rolePermissions, saveStudent, scoreComponents, scores, seedDemoData, session, setSession, students, subjects, talentsOptions, upsertAttendance, upsertScore],
+    [assessmentGroups, attendance, attendanceTermStartDates, classRemarks, conductOptions, deleteStudent, departmentOptions, gradingScale, headRemarks, houseOptions, isOnline, isSyncing, lastSyncError, lastSyncedAt, refresh, replaceAttendance, rolePermissions, saveStudent, scoreComponents, scores, seedDemoData, session, setSession, students, subjects, talentsOptions, upsertAttendance, upsertScore],
   );
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Card, EmptyState, SectionHeader } from "../../components/ui";
@@ -51,19 +51,9 @@ function nextMark(mark: AttendanceMark) {
   return markCycle[(current + 1) % markCycle.length];
 }
 
-function calendarWeekLabel(weekStart: string) {
-  const currentWeek = startOfWeek(todayISO());
-  const delta = Math.round((parseISODate(weekStart).getTime() - parseISODate(currentWeek).getTime()) / 604800000);
-  if (delta === 0) return "This week";
-  if (delta === -1) return "Last week";
-  if (delta === 1) return "Next week";
-  return `${shortDate(weekStart)} - ${shortDate(addDays(weekStart, 4))}`;
-}
-
 export default function AttendanceScreen() {
   const { students, attendance, attendanceTermStartDates, session, upsertAttendance, replaceAttendance } = useData();
-  const [weekStart, setWeekStart] = useState(startOfWeek(todayISO()));
-  const autoPickedWeek = useRef(false);
+  const [termWeek, setTermWeek] = useState(1);
   const [undoStack, setUndoStack] = useState<AttendanceRecord[][]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -72,8 +62,8 @@ export default function AttendanceScreen() {
     () => startOfWeek(attendanceTermStartDates[termKey] || todayISO()),
     [attendanceTermStartDates, termKey],
   );
+  const weekStart = useMemo(() => addDays(termWeekStart, (termWeek - 1) * 7), [termWeek, termWeekStart]);
   const weekDates = useMemo(() => weekLabels.map((_, index) => addDays(weekStart, index)), [weekStart]);
-  const weekNumber = Math.max(1, Math.floor((parseISODate(weekStart).getTime() - parseISODate(termWeekStart).getTime()) / 604800000) + 1);
 
   const recordsByCell = useMemo(() => {
     const weekSet = new Set(weekDates);
@@ -95,52 +85,49 @@ export default function AttendanceScreen() {
   }, [recordsByCell]);
 
   useEffect(() => {
-    if (attendanceTermStartDates[termKey]) {
-      setWeekStart(termWeekStart);
-      autoPickedWeek.current = true;
-    }
-  }, [attendanceTermStartDates, termKey, termWeekStart]);
+    setTermWeek(1);
+  }, [termKey, termWeekStart]);
 
-  useEffect(() => {
-    if (autoPickedWeek.current || !attendance.length) return;
-    if (weekDates.some((date) => attendance.some((record) => record.attendance_date === date))) return;
-    const latestDate = attendance
-      .map((record) => record.attendance_date)
-      .filter(Boolean)
-      .sort()
-      .at(-1);
-    if (latestDate) {
-      autoPickedWeek.current = true;
-      setWeekStart(startOfWeek(latestDate));
-    }
-  }, [attendance, weekDates]);
-
-  const shiftWeek = (weeks: number) => setWeekStart((current) => addDays(current, weeks * 7));
+  const shiftWeek = (weeks: number) => setTermWeek((current) => Math.max(1, current + weeks));
 
   const markSingle = async (studentId: string, date: string) => {
     const selected = recordsByCell.get(`${studentId}|${date}`)?.mark ?? "";
     setUndoStack((prev) => [...prev, attendance]);
-    await upsertAttendance(studentId, date, nextMark(selected));
+    try {
+      await upsertAttendance(studentId, date, nextMark(selected));
+    } catch {
+      setUndoStack((prev) => prev.slice(0, -1));
+    }
   };
 
   const markWeekPresent = async () => {
     setBusy(true);
     setUndoStack((prev) => [...prev, attendance]);
-    for (const student of students) {
-      for (const date of weekDates) {
-        await upsertAttendance(student.student_id, date, "P");
+    try {
+      for (const student of students) {
+        for (const date of weekDates) {
+          await upsertAttendance(student.student_id, date, "P");
+        }
       }
+    } catch {
+      setUndoStack((prev) => prev.slice(0, -1));
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   };
 
   const clearWeek = async () => {
     setBusy(true);
     setUndoStack((prev) => [...prev, attendance]);
-    for (const record of Array.from(recordsByCell.values())) {
-      await upsertAttendance(record.student_id, record.attendance_date, "");
+    try {
+      for (const record of Array.from(recordsByCell.values())) {
+        await upsertAttendance(record.student_id, record.attendance_date, "");
+      }
+    } catch {
+      setUndoStack((prev) => prev.slice(0, -1));
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   };
 
   const undo = async () => {
@@ -158,21 +145,9 @@ export default function AttendanceScreen() {
           <Pressable onPress={() => shiftWeek(-1)} style={styles.arrowButton}>
             <Text style={styles.arrowText}>{"<"}</Text>
           </Pressable>
-          <View style={styles.weekLabel}>
-            <Text style={styles.weekText}>{calendarWeekLabel(weekStart)}</Text>
-            <Text style={styles.weekMeta}>{shortDate(weekDates[0])} - {shortDate(weekDates[4])}</Text>
-          </View>
-          <Pressable onPress={() => shiftWeek(1)} style={styles.arrowButton}>
-            <Text style={styles.arrowText}>{">"}</Text>
-          </Pressable>
-        </View>
-        <View style={styles.navRow}>
-          <Pressable onPress={() => shiftWeek(-1)} style={styles.arrowButton}>
-            <Text style={styles.arrowText}>{"<"}</Text>
-          </Pressable>
           <View style={styles.termWeekButton}>
-            <Text style={styles.weekText}>Week {weekNumber}</Text>
-            <Text style={styles.weekMeta}>from term start</Text>
+            <Text style={styles.weekText}>Week {termWeek}</Text>
+            <Text style={styles.weekMeta}>{shortDate(weekDates[0])} - {shortDate(weekDates[4])}</Text>
           </View>
           <Pressable onPress={() => shiftWeek(1)} style={styles.arrowButton}>
             <Text style={styles.arrowText}>{">"}</Text>
@@ -208,7 +183,7 @@ export default function AttendanceScreen() {
                   <Text style={styles.meta}>{student.admission_number ?? student.student_id}</Text>
                 </View>
                 <View style={styles.dayGrid}>
-                  {weekDates.map((date) => {
+                  {weekDates.map((date, index) => {
                     const mark = recordsByCell.get(`${student.student_id}|${date}`)?.mark ?? "";
                     const style = mark ? markStyles[mark] : null;
                     return (
@@ -220,7 +195,7 @@ export default function AttendanceScreen() {
                           style ? { backgroundColor: style.bg, borderColor: style.border } : null,
                         ]}
                       >
-                        <Text style={[styles.markText, style ? { color: style.text } : null]}>{mark || "-"}</Text>
+                        <Text style={[styles.markText, !mark && styles.placeholderText, style ? { color: style.text } : null]}>{mark || weekLabels[index]}</Text>
                       </Pressable>
                     );
                   })}
@@ -249,7 +224,6 @@ const styles = StyleSheet.create({
     width: 42,
   },
   arrowText: { color: colors.text, fontSize: 18, fontWeight: "800" },
-  weekLabel: { alignItems: "center", flex: 1, gap: 2, minWidth: 130 },
   weekText: { color: colors.text, fontSize: 16, fontWeight: "700", textAlign: "center" },
   weekMeta: { color: colors.muted, fontSize: 11, textAlign: "center" },
   termWeekButton: {
@@ -301,7 +275,7 @@ const styles = StyleSheet.create({
   dateHeader: { color: colors.muted, fontSize: 9, fontWeight: "500" },
   tableRow: { gap: spacing.sm, padding: spacing.sm },
   studentCell: { justifyContent: "center", minHeight: 34 },
-  name: { color: colors.text, fontSize: 14, fontWeight: "700" },
+  name: { color: colors.text, fontSize: 16, fontWeight: "700" },
   meta: { color: colors.muted, fontSize: 11, fontWeight: "400" },
   dayGrid: { flexDirection: "row", gap: 4 },
   markCell: {
@@ -316,4 +290,5 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   markText: { color: colors.muted, fontSize: 15, fontWeight: "800" },
+  placeholderText: { color: colors.muted, fontSize: 10, fontWeight: "700" },
 });

@@ -411,6 +411,7 @@ export function DataProvider({ children }: PropsWithChildren) {
   const upsertAttendance = useCallback(
     async (studentId: string, date: string, mark: AttendanceMark) => {
       const student = students.find((item) => item.student_id === studentId);
+      const previousAttendance = attendance;
       const record: AttendanceRecord = {
         attendance_id: makeAttendanceId(session.school_id, studentId, session.academic_year, session.term, date),
         student_id: studentId,
@@ -426,13 +427,12 @@ export function DataProvider({ children }: PropsWithChildren) {
         return mark ? [...rest, record] : rest;
       });
       if (client) {
-        if (mark) {
-          await client.from("daily_attendance").upsert(
+        const result = mark
+          ? await client.from("daily_attendance").upsert(
             { ...record, school_id: session.school_id },
             { onConflict: ATTENDANCE_CONFLICT_TARGET },
-          );
-        } else {
-          await client
+          )
+          : await client
             .from("daily_attendance")
             .delete()
             .eq("school_id", session.school_id)
@@ -440,10 +440,17 @@ export function DataProvider({ children }: PropsWithChildren) {
             .eq("academic_year", session.academic_year)
             .eq("term", session.term)
             .eq("attendance_date", date);
+        if (result.error) {
+          setAttendance(previousAttendance);
+          setLastSyncError(result.error.message);
+          setOnline(false);
+          throw result.error;
         }
+        setOnline(true);
+        setLastSyncError(null);
       }
     },
-    [client, session, students],
+    [attendance, client, session, students],
   );
 
   const bulkAttendance = useCallback(
@@ -483,6 +490,7 @@ export function DataProvider({ children }: PropsWithChildren) {
   const upsertScore = useCallback(
     async (studentId: string, subject: string, field: string, value: number | null) => {
       const student = students.find((item) => item.student_id === studentId);
+      const previousScores = scores;
       const scoreId = makeScoreId(session.school_id, studentId, session.academic_year, session.term, subject);
       const existing = scores.find((item) => sameScorePeriod(item, studentId, session.academic_year, session.term, subject));
       const nextScores = { ...(existing?.scores ?? {}) };
@@ -503,13 +511,12 @@ export function DataProvider({ children }: PropsWithChildren) {
         return Object.keys(nextScores).length ? [...rest, nextRecord] : rest;
       });
       if (client) {
-        if (Object.keys(nextScores).length) {
-          await client.from("student_scores").upsert(
+        const result = Object.keys(nextScores).length
+          ? await client.from("student_scores").upsert(
             { ...nextRecord, scores: JSON.stringify(nextRecord.scores), school_id: session.school_id },
             { onConflict: SCORE_CONFLICT_TARGET },
-          );
-        } else {
-          await client
+          )
+          : await client
             .from("student_scores")
             .delete()
             .eq("school_id", session.school_id)
@@ -517,7 +524,14 @@ export function DataProvider({ children }: PropsWithChildren) {
             .eq("academic_year", session.academic_year)
             .eq("term", session.term)
             .eq("subject", subject);
+        if (result.error) {
+          setScores(previousScores);
+          setLastSyncError(result.error.message);
+          setOnline(false);
+          throw result.error;
         }
+        setOnline(true);
+        setLastSyncError(null);
       }
     },
     [client, scores, session, students],

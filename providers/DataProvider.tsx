@@ -5,7 +5,7 @@ import { ASSESSMENT_GROUPS, CURRENT_YEAR, GRADING_SCALE, SCORE_COMPONENTS, SUBJE
 import { demoAttendance, demoScores, demoStudents } from "../lib/demoData";
 import { makeAttendanceId, makeMobileStudentId, makeScoreId, nowISO, todayISO } from "../lib/ids";
 import { DEMO_CACHE_KEY, makeDataCacheKey } from "../lib/cacheKeys";
-import { AssessmentGroup, AttendanceMark, AttendanceRecord, GradingScaleItem, ScoreComponent, SessionContext, Student, StudentDraft, SubjectScore } from "../types";
+import { AssessmentGroup, AttendanceMark, AttendanceRecord, GradingScaleItem, PermissionKey, ScoreComponent, SessionContext, Student, StudentDraft, SubjectScore } from "../types";
 import { useSupabase } from "./SupabaseProvider";
 
 type DataContextValue = {
@@ -13,9 +13,16 @@ type DataContextValue = {
   setSession: (next: Partial<SessionContext>) => void;
   students: Student[];
   subjects: string[];
+  conductOptions: string[];
+  talentsOptions: string[];
+  classRemarks: string[];
+  headRemarks: string[];
+  departmentOptions: string[];
+  houseOptions: string[];
   scoreComponents: ScoreComponent[];
   assessmentGroups: Record<string, AssessmentGroup>;
   gradingScale: GradingScaleItem[];
+  rolePermissions: Partial<Record<PermissionKey, boolean>>;
   attendanceTermStartDates: Record<string, string>;
   scores: SubjectScore[];
   attendance: AttendanceRecord[];
@@ -37,6 +44,7 @@ const DataContext = createContext<DataContextValue | null>(null);
 const SCORE_CONFLICT_TARGET = "school_id,student_id,academic_year,term,subject";
 const ATTENDANCE_CONFLICT_TARGET = "school_id,student_id,academic_year,term,attendance_date";
 const PENDING_SYNC_SUFFIX = ":pending-sync-v1";
+const SESSION_SUFFIX = ":session-v1";
 
 type PendingChange =
   | {
@@ -148,19 +156,22 @@ function parseSetting<T>(value: unknown, fallback: T): T {
 }
 
 function normalizeSubjects(value: unknown) {
+  return normalizeStringList(value);
+}
+
+function normalizeStringList(value: unknown) {
   const raw = parseSetting<unknown>(value, null);
   if (!Array.isArray(raw)) return [];
-  const subjects = raw
+  return raw
     .map((item) => {
       if (typeof item === "string") return item.trim();
       if (item && typeof item === "object") {
         const record = item as Record<string, unknown>;
-        return String(record.name ?? record.label ?? record.subject ?? "").trim();
+        return String(record.name ?? record.label ?? record.subject ?? record.value ?? "").trim();
       }
       return "";
     })
     .filter(Boolean);
-  return subjects;
 }
 
 function normalizeScoreComponents(value: unknown) {
@@ -232,9 +243,16 @@ export function DataProvider({ children }: PropsWithChildren) {
   });
   const [students, setStudents] = useState<Student[]>([]);
   const [subjects, setSubjects] = useState<string[]>([]);
+  const [conductOptions, setConductOptions] = useState<string[]>([]);
+  const [talentsOptions, setTalentsOptions] = useState<string[]>([]);
+  const [classRemarks, setClassRemarks] = useState<string[]>([]);
+  const [headRemarks, setHeadRemarks] = useState<string[]>([]);
+  const [departmentOptions, setDepartmentOptions] = useState<string[]>([]);
+  const [houseOptions, setHouseOptions] = useState<string[]>([]);
   const [scoreComponents, setScoreComponents] = useState<ScoreComponent[]>([]);
   const [assessmentGroups, setAssessmentGroups] = useState<Record<string, AssessmentGroup>>({});
   const [gradingScale, setGradingScale] = useState<GradingScaleItem[]>([]);
+  const [rolePermissions, setRolePermissions] = useState<Partial<Record<PermissionKey, boolean>>>({});
   const [attendanceTermStartDates, setAttendanceTermStartDates] = useState<Record<string, string>>({});
   const [scores, setScores] = useState<SubjectScore[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
@@ -243,13 +261,34 @@ export function DataProvider({ children }: PropsWithChildren) {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [lastSyncError, setLastSyncError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setSessionState((prev) => ({ ...prev, school_id: config.schoolId }));
-  }, [config.schoolId]);
-
   const cacheKey = client ? makeDataCacheKey(session.school_id) : DEMO_CACHE_KEY;
+  const sessionKey = `${cacheKey}${SESSION_SUFFIX}`;
 
-  const cache = useCallback(async (payload: Partial<Pick<DataContextValue, "students" | "subjects" | "scores" | "attendance" | "scoreComponents" | "assessmentGroups" | "gradingScale" | "attendanceTermStartDates">>) => {
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(sessionKey).then((raw) => {
+      if (!active) return;
+      if (!raw) {
+        setSessionState((prev) => ({ ...prev, school_id: config.schoolId }));
+        return;
+      }
+      try {
+        const saved = JSON.parse(raw) as Partial<SessionContext>;
+        setSessionState((prev) => ({
+          ...prev,
+          ...saved,
+          school_id: config.schoolId || saved.school_id || prev.school_id,
+        }));
+      } catch {
+        setSessionState((prev) => ({ ...prev, school_id: config.schoolId }));
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [config.schoolId, sessionKey]);
+
+  const cache = useCallback(async (payload: Partial<Pick<DataContextValue, "students" | "subjects" | "conductOptions" | "talentsOptions" | "classRemarks" | "headRemarks" | "departmentOptions" | "houseOptions" | "scores" | "attendance" | "scoreComponents" | "assessmentGroups" | "gradingScale" | "rolePermissions" | "attendanceTermStartDates">>) => {
     const raw = await AsyncStorage.getItem(cacheKey);
     const previous = raw ? JSON.parse(raw) as Record<string, unknown> : {};
     await AsyncStorage.setItem(cacheKey, JSON.stringify({ ...previous, ...payload }));
@@ -386,9 +425,16 @@ export function DataProvider({ children }: PropsWithChildren) {
         setScores([]);
         setAttendance([]);
         setSubjects([]);
+        setConductOptions([]);
+        setTalentsOptions([]);
+        setClassRemarks([]);
+        setHeadRemarks([]);
+        setDepartmentOptions([]);
+        setHouseOptions([]);
         setScoreComponents([]);
         setAssessmentGroups({});
         setGradingScale([]);
+        setRolePermissions({});
         setAttendanceTermStartDates({});
         return;
       }
@@ -397,16 +443,30 @@ export function DataProvider({ children }: PropsWithChildren) {
         scores?: SubjectScore[];
         attendance?: AttendanceRecord[];
         subjects?: string[];
+        conductOptions?: string[];
+        talentsOptions?: string[];
+        classRemarks?: string[];
+        headRemarks?: string[];
+        departmentOptions?: string[];
+        houseOptions?: string[];
         scoreComponents?: ScoreComponent[];
         assessmentGroups?: Record<string, AssessmentGroup>;
         gradingScale?: GradingScaleItem[];
+        rolePermissions?: Partial<Record<PermissionKey, boolean>>;
         attendanceTermStartDates?: Record<string, string>;
       };
       if (cached.students?.length) setStudents(cached.students);
       if (cached.subjects?.length) setSubjects(cached.subjects);
+      if (cached.conductOptions?.length) setConductOptions(cached.conductOptions);
+      if (cached.talentsOptions?.length) setTalentsOptions(cached.talentsOptions);
+      if (cached.classRemarks?.length) setClassRemarks(cached.classRemarks);
+      if (cached.headRemarks?.length) setHeadRemarks(cached.headRemarks);
+      if (cached.departmentOptions?.length) setDepartmentOptions(cached.departmentOptions);
+      if (cached.houseOptions?.length) setHouseOptions(cached.houseOptions);
       if (cached.scoreComponents?.length) setScoreComponents(cached.scoreComponents);
       if (cached.assessmentGroups) setAssessmentGroups(cached.assessmentGroups);
       if (cached.gradingScale?.length) setGradingScale(cached.gradingScale);
+      if (cached.rolePermissions) setRolePermissions(cached.rolePermissions);
       if (cached.attendanceTermStartDates) setAttendanceTermStartDates(cached.attendanceTermStartDates);
       if (cached.scores) setScores(cached.scores);
       if (cached.attendance) setAttendance(cached.attendance);
@@ -485,6 +545,7 @@ export function DataProvider({ children }: PropsWithChildren) {
         activeSession.section !== session.section
       ) {
         setSessionState((prev) => ({ ...prev, ...activeSession }));
+        await AsyncStorage.setItem(sessionKey, JSON.stringify(activeSession));
       }
 
       const [scoreRes, attendanceRes, settingsRes] = await Promise.all([
@@ -502,7 +563,7 @@ export function DataProvider({ children }: PropsWithChildren) {
           .eq("term", activeSession.term),
         client
           .from("school_settings")
-          .select("subjects,score_components,assessment_groups,grading_scale,attendance_term_start_dates,settings")
+          .select("subjects,conduct_options,talents_options,class_remarks,head_remarks,department_options,house_options,score_components,assessment_groups,grading_scale,role_permissions,attendance_term_start_dates,settings")
           .eq("school_id", activeSession.school_id)
           .maybeSingle(),
       ]);
@@ -521,15 +582,29 @@ export function DataProvider({ children }: PropsWithChildren) {
       const nextAttendance = applyPendingAttendance(nextAttendanceRaw, pending, activeSession);
       const settings = settingsRes.data as any;
       const nextSubjects = normalizeSubjects(settings?.subjects ?? settings?.settings?.subjects);
+      const nextConduct = normalizeStringList(settings?.conduct_options ?? settings?.settings?.conduct_options);
+      const nextTalents = normalizeStringList(settings?.talents_options ?? settings?.settings?.talents_options);
+      const nextClassRemarks = normalizeStringList(settings?.class_remarks ?? settings?.settings?.class_remarks);
+      const nextHeadRemarks = normalizeStringList(settings?.head_remarks ?? settings?.settings?.head_remarks);
+      const nextDepartments = normalizeStringList(settings?.department_options ?? settings?.settings?.department_options);
+      const nextHouses = normalizeStringList(settings?.house_options ?? settings?.settings?.house_options);
       const nextComponents = normalizeScoreComponents(settings?.score_components ?? settings?.settings?.score_components);
       const nextGroups = normalizeAssessmentGroups(settings?.assessment_groups ?? settings?.settings?.assessment_groups);
       const nextGrading = normalizeGradingScale(settings?.grading_scale ?? settings?.settings?.grading_scale);
+      const nextRolePermissions = parseSetting<Partial<Record<PermissionKey, boolean>>>(settings?.role_permissions ?? settings?.settings?.role_permissions, {});
       const nextTermStarts = parseSetting<Record<string, string>>(settings?.attendance_term_start_dates ?? settings?.settings?.attendance_term_start_dates, {});
       setStudents(nextStudents);
       setSubjects(nextSubjects);
+      setConductOptions(nextConduct);
+      setTalentsOptions(nextTalents);
+      setClassRemarks(nextClassRemarks);
+      setHeadRemarks(nextHeadRemarks);
+      setDepartmentOptions(nextDepartments);
+      setHouseOptions(nextHouses);
       setScoreComponents(nextComponents);
       setAssessmentGroups(nextGroups);
       setGradingScale(nextGrading);
+      setRolePermissions(nextRolePermissions);
       setAttendanceTermStartDates(nextTermStarts);
       setScores(nextScoresWithPending);
       setAttendance(nextAttendance);
@@ -537,30 +612,57 @@ export function DataProvider({ children }: PropsWithChildren) {
       setLastSyncError(pendingFlushed ? null : "Some offline changes are pending upload.");
       const syncedAt = nowISO();
       setLastSyncedAt(syncedAt);
-      await cache({ students: nextStudents, subjects: nextSubjects, scoreComponents: nextComponents, assessmentGroups: nextGroups, gradingScale: nextGrading, attendanceTermStartDates: nextTermStarts, scores: nextScoresWithPending, attendance: nextAttendance });
+      await cache({
+        students: nextStudents,
+        subjects: nextSubjects,
+        conductOptions: nextConduct,
+        talentsOptions: nextTalents,
+        classRemarks: nextClassRemarks,
+        headRemarks: nextHeadRemarks,
+        departmentOptions: nextDepartments,
+        houseOptions: nextHouses,
+        scoreComponents: nextComponents,
+        assessmentGroups: nextGroups,
+        gradingScale: nextGrading,
+        rolePermissions: nextRolePermissions,
+        attendanceTermStartDates: nextTermStarts,
+        scores: nextScoresWithPending,
+        attendance: nextAttendance,
+      });
     } catch (error) {
       setOnline(false);
       setLastSyncError(error instanceof Error ? error.message : "Sync failed.");
     } finally {
       setSyncing(false);
     }
-  }, [cache, client, flushPendingChanges, loadPendingChanges, session]);
+  }, [cache, client, flushPendingChanges, loadPendingChanges, session, sessionKey]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
   const setSession = useCallback((next: Partial<SessionContext>) => {
-    setSessionState((prev) => ({ ...prev, ...next }));
-  }, []);
+    setSessionState((prev) => {
+      const merged = { ...prev, ...next };
+      AsyncStorage.setItem(sessionKey, JSON.stringify(merged)).catch(() => undefined);
+      return merged;
+    });
+  }, [sessionKey]);
 
   const seedDemoData = useCallback(async () => {
     if (client) return;
     setStudents(demoStudents);
     setSubjects(SUBJECTS);
+    setConductOptions([]);
+    setTalentsOptions([]);
+    setClassRemarks([]);
+    setHeadRemarks([]);
+    setDepartmentOptions([]);
+    setHouseOptions([]);
     setScoreComponents(SCORE_COMPONENTS);
     setAssessmentGroups(ASSESSMENT_GROUPS);
     setGradingScale(GRADING_SCALE);
+    setRolePermissions({});
     setAttendanceTermStartDates({});
     setScores(demoScores);
     setAttendance(demoAttendance);
@@ -568,9 +670,16 @@ export function DataProvider({ children }: PropsWithChildren) {
     await cache({
       students: demoStudents,
       subjects: SUBJECTS,
+      conductOptions: [],
+      talentsOptions: [],
+      classRemarks: [],
+      headRemarks: [],
+      departmentOptions: [],
+      houseOptions: [],
       scoreComponents: SCORE_COMPONENTS,
       assessmentGroups: ASSESSMENT_GROUPS,
       gradingScale: GRADING_SCALE,
+      rolePermissions: {},
       attendanceTermStartDates: {},
       scores: demoScores,
       attendance: demoAttendance,
@@ -588,6 +697,7 @@ export function DataProvider({ children }: PropsWithChildren) {
         parent_name: draft.parent_name?.trim(),
         parent_contact: draft.parent_contact?.trim(),
         house: draft.house?.trim(),
+        department: draft.department?.trim(),
         grade: session.grade,
         section: session.section,
         academic_year: session.academic_year,
@@ -841,9 +951,16 @@ export function DataProvider({ children }: PropsWithChildren) {
       setSession,
       students,
       subjects,
+      conductOptions,
+      talentsOptions,
+      classRemarks,
+      headRemarks,
+      departmentOptions,
+      houseOptions,
       scoreComponents,
       assessmentGroups,
       gradingScale,
+      rolePermissions,
       attendanceTermStartDates,
       scores,
       attendance,
@@ -860,7 +977,7 @@ export function DataProvider({ children }: PropsWithChildren) {
       replaceAttendance,
       upsertScore,
     }),
-    [assessmentGroups, attendance, attendanceTermStartDates, bulkAttendance, deleteStudent, gradingScale, isOnline, isSyncing, lastSyncError, lastSyncedAt, refresh, replaceAttendance, saveStudent, scoreComponents, scores, seedDemoData, session, setSession, students, subjects, upsertAttendance, upsertScore],
+    [assessmentGroups, attendance, attendanceTermStartDates, bulkAttendance, classRemarks, conductOptions, deleteStudent, departmentOptions, gradingScale, headRemarks, houseOptions, isOnline, isSyncing, lastSyncError, lastSyncedAt, refresh, replaceAttendance, rolePermissions, saveStudent, scoreComponents, scores, seedDemoData, session, setSession, students, subjects, talentsOptions, upsertAttendance, upsertScore],
   );
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

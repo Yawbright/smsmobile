@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { Card, EmptyState, SectionHeader } from "../../components/ui";
+import { SelectMenu } from "../../components/SelectMenu";
 import { colors, radius, spacing } from "../../constants/theme";
 import { useData } from "../../providers/DataProvider";
 import { Student, StudentDraft } from "../../types";
@@ -13,10 +14,11 @@ const emptyDraft: StudentDraft = {
   parent_name: "",
   parent_contact: "",
   house: "",
+  department: "",
 };
 
 export default function StudentsScreen() {
-  const { students, attendance, saveStudent, deleteStudent } = useData();
+  const { students, attendance, saveStudent, deleteStudent, houseOptions, departmentOptions } = useData();
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState<StudentDraft>(emptyDraft);
   const [modalOpen, setModalOpen] = useState(false);
@@ -98,8 +100,19 @@ export default function StudentsScreen() {
               <Field label="Parent" value={draft.parent_name ?? ""} onChangeText={(parent_name) => setDraft((prev) => ({ ...prev, parent_name }))} />
               <View style={styles.twoCols}>
                 <Field label="Contact" value={draft.parent_contact ?? ""} onChangeText={(parent_contact) => setDraft((prev) => ({ ...prev, parent_contact }))} />
-                <Field label="House" value={draft.house ?? ""} onChangeText={(house) => setDraft((prev) => ({ ...prev, house }))} />
+                <OptionField
+                  label="House"
+                  value={draft.house ?? ""}
+                  options={houseOptions}
+                  onChange={(house) => setDraft((prev) => ({ ...prev, house }))}
+                />
               </View>
+              <OptionField
+                label="Department"
+                value={draft.department ?? ""}
+                options={departmentOptions}
+                onChange={(department) => setDraft((prev) => ({ ...prev, department }))}
+              />
               {selected ? <Text style={styles.detail}>Present marks loaded: {present}</Text> : null}
             </ScrollView>
             <View style={styles.actions}>
@@ -126,6 +139,7 @@ function studentToDraft(student: Student): StudentDraft {
     parent_name: student.parent_name ?? "",
     parent_contact: student.parent_contact ?? "",
     house: student.house ?? "",
+    department: student.department ?? "",
   };
 }
 
@@ -134,6 +148,22 @@ function Field({ label, value, onChangeText }: { label: string; value: string; o
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
       <TextInput value={value} onChangeText={onChangeText} placeholderTextColor={colors.placeholder} style={styles.input} />
+    </View>
+  );
+}
+
+function OptionField({ label, value, options, onChange }: { label: string; value: string; options: string[]; onChange: (value: string) => void }) {
+  const cleaned = options.map((item) => item.trim()).filter(Boolean);
+  if (!cleaned.length) return <Field label={label} value={value} onChangeText={onChange} />;
+  const merged = value && !cleaned.includes(value) ? [value, ...cleaned] : cleaned;
+  return (
+    <View style={styles.selectField}>
+      <SelectMenu
+        label={label}
+        value={value}
+        options={merged.map((item) => ({ label: item, value: item }))}
+        onChange={onChange}
+      />
     </View>
   );
 }
@@ -199,6 +229,7 @@ const styles = StyleSheet.create({
   modalBody: { gap: spacing.md, paddingVertical: spacing.lg },
   twoCols: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
   field: { flex: 1, minWidth: 150 },
+  selectField: { flex: 1, minWidth: 150 },
   label: { color: colors.muted, fontSize: 12, fontWeight: "600", marginBottom: spacing.xs },
   input: {
     backgroundColor: colors.panel,

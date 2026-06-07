@@ -31,6 +31,7 @@ export type Student = {
   gender: "Male" | "Female" | string;
   admission_number?: string;
   house?: string;
+  department?: string;
   parent_name?: string;
   parent_contact?: string;
   grade: string;
@@ -50,6 +51,7 @@ export type StudentDraft = {
   parent_name?: string;
   parent_contact?: string;
   house?: string;
+  department?: string;
 };
 
 export type ScoreComponent = {

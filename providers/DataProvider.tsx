@@ -36,6 +36,33 @@ type DataContextValue = {
 const DataContext = createContext<DataContextValue | null>(null);
 const SCORE_CONFLICT_TARGET = "school_id,student_id,academic_year,term,subject";
 const ATTENDANCE_CONFLICT_TARGET = "school_id,student_id,academic_year,term,attendance_date";
+const PENDING_SYNC_SUFFIX = ":pending-sync-v1";
+
+type PendingChange =
+  | {
+      id: string;
+      entity: "attendance";
+      action: "upsert" | "delete";
+      school_id: string;
+      record: AttendanceRecord;
+      updated_at: string;
+    }
+  | {
+      id: string;
+      entity: "score";
+      action: "upsert" | "delete";
+      school_id: string;
+      record: SubjectScore;
+      updated_at: string;
+    }
+  | {
+      id: string;
+      entity: "student";
+      action: "upsert" | "delete";
+      school_id: string;
+      record: Student;
+      updated_at: string;
+    };
 
 function sameScorePeriod(record: SubjectScore, studentId: string, academicYear: string, term: string, subject: string) {
   return record.student_id === studentId && record.academic_year === academicYear && record.term === term && record.subject === subject;
@@ -43,6 +70,70 @@ function sameScorePeriod(record: SubjectScore, studentId: string, academicYear: 
 
 function sameAttendancePeriod(record: AttendanceRecord, studentId: string, academicYear: string, term: string, date: string) {
   return record.student_id === studentId && record.academic_year === academicYear && record.term === term && record.attendance_date === date;
+}
+
+function parseTime(value?: string | null) {
+  if (!value) return 0;
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : 0;
+}
+
+function pendingIsNewerOrEqual(localUpdatedAt: string, cloudUpdatedAt?: string | null) {
+  return parseTime(localUpdatedAt) >= parseTime(cloudUpdatedAt);
+}
+
+function pendingAttendanceId(schoolId: string, studentId: string, academicYear: string, term: string, date: string) {
+  return `attendance|${schoolId}|${studentId}|${academicYear}|${term}|${date}`;
+}
+
+function pendingScoreId(schoolId: string, studentId: string, academicYear: string, term: string, subject: string) {
+  return `score|${schoolId}|${studentId}|${academicYear}|${term}|${subject}`;
+}
+
+function pendingStudentId(schoolId: string, studentId: string) {
+  return `student|${schoolId}|${studentId}`;
+}
+
+function applyPendingStudents(cloudStudents: Student[], pending: PendingChange[], session: SessionContext) {
+  let next = [...cloudStudents];
+  for (const change of pending) {
+    if (change.entity !== "student" || change.school_id !== session.school_id) continue;
+    const local = change.record;
+    if (local.academic_year !== session.academic_year || local.grade !== session.grade || local.section !== session.section) continue;
+    const existing = next.find((student) => student.student_id === local.student_id);
+    if (!pendingIsNewerOrEqual(change.updated_at, existing?.updated_at)) continue;
+    next = next.filter((student) => student.student_id !== local.student_id);
+    if (change.action === "upsert" && !local.is_deleted) next.push(local);
+  }
+  return next.sort((a, b) => a.student_name.localeCompare(b.student_name));
+}
+
+function applyPendingScores(cloudScores: SubjectScore[], pending: PendingChange[], session: SessionContext) {
+  let next = [...cloudScores];
+  for (const change of pending) {
+    if (change.entity !== "score" || change.school_id !== session.school_id) continue;
+    const local = change.record;
+    if (local.academic_year !== session.academic_year || local.term !== session.term) continue;
+    const existing = next.find((score) => sameScorePeriod(score, local.student_id, local.academic_year, local.term, local.subject));
+    if (!pendingIsNewerOrEqual(change.updated_at, existing?.updated_at)) continue;
+    next = next.filter((score) => !sameScorePeriod(score, local.student_id, local.academic_year, local.term, local.subject));
+    if (change.action === "upsert" && Object.keys(local.scores).length) next.push(local);
+  }
+  return next;
+}
+
+function applyPendingAttendance(cloudAttendance: AttendanceRecord[], pending: PendingChange[], session: SessionContext) {
+  let next = [...cloudAttendance];
+  for (const change of pending) {
+    if (change.entity !== "attendance" || change.school_id !== session.school_id) continue;
+    const local = change.record;
+    if (local.academic_year !== session.academic_year || local.term !== session.term) continue;
+    const existing = next.find((record) => sameAttendancePeriod(record, local.student_id, local.academic_year, local.term, local.attendance_date));
+    if (!pendingIsNewerOrEqual(change.updated_at, existing?.updated_at)) continue;
+    next = next.filter((record) => !sameAttendancePeriod(record, local.student_id, local.academic_year, local.term, local.attendance_date));
+    if (change.action === "upsert" && local.mark) next.push(local);
+  }
+  return next;
 }
 
 function parseSetting<T>(value: unknown, fallback: T): T {
@@ -163,6 +254,130 @@ export function DataProvider({ children }: PropsWithChildren) {
     const previous = raw ? JSON.parse(raw) as Record<string, unknown> : {};
     await AsyncStorage.setItem(cacheKey, JSON.stringify({ ...previous, ...payload }));
   }, [cacheKey]);
+  const pendingKey = `${cacheKey}${PENDING_SYNC_SUFFIX}`;
+
+  const loadPendingChanges = useCallback(async () => {
+    const raw = await AsyncStorage.getItem(pendingKey);
+    if (!raw) return [] as PendingChange[];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed as PendingChange[] : [];
+    } catch {
+      return [] as PendingChange[];
+    }
+  }, [pendingKey]);
+
+  const savePendingChanges = useCallback(async (changes: PendingChange[]) => {
+    if (changes.length) await AsyncStorage.setItem(pendingKey, JSON.stringify(changes));
+    else await AsyncStorage.removeItem(pendingKey);
+  }, [pendingKey]);
+
+  const enqueuePendingChange = useCallback(async (change: PendingChange) => {
+    const pending = await loadPendingChanges();
+    const next = [...pending.filter((item) => item.id !== change.id), change];
+    await savePendingChanges(next);
+  }, [loadPendingChanges, savePendingChanges]);
+
+  const removePendingChange = useCallback(async (id: string) => {
+    const pending = await loadPendingChanges();
+    await savePendingChanges(pending.filter((item) => item.id !== id));
+  }, [loadPendingChanges, savePendingChanges]);
+
+  const flushPendingChanges = useCallback(async () => {
+    if (!client) return false;
+    const pending = await loadPendingChanges();
+    if (!pending.length) return true;
+
+    const remaining: PendingChange[] = [];
+    for (const change of pending) {
+      try {
+        if (change.entity === "attendance") {
+          const record = change.record;
+          const cloud = await client
+            .from("daily_attendance")
+            .select("updated_at")
+            .eq("school_id", change.school_id)
+            .eq("student_id", record.student_id)
+            .eq("academic_year", record.academic_year)
+            .eq("term", record.term)
+            .eq("attendance_date", record.attendance_date)
+            .maybeSingle();
+          if (cloud.error) throw cloud.error;
+          if (pendingIsNewerOrEqual(change.updated_at, cloud.data?.updated_at)) {
+            const result = change.action === "upsert" && record.mark
+              ? await client.from("daily_attendance").upsert(
+                { ...record, school_id: change.school_id },
+                { onConflict: ATTENDANCE_CONFLICT_TARGET },
+              )
+              : await client
+                .from("daily_attendance")
+                .delete()
+                .eq("school_id", change.school_id)
+                .eq("student_id", record.student_id)
+                .eq("academic_year", record.academic_year)
+                .eq("term", record.term)
+                .eq("attendance_date", record.attendance_date);
+            if (result.error) throw result.error;
+          }
+        } else if (change.entity === "score") {
+          const record = change.record;
+          const cloud = await client
+            .from("student_scores")
+            .select("updated_at")
+            .eq("school_id", change.school_id)
+            .eq("student_id", record.student_id)
+            .eq("academic_year", record.academic_year)
+            .eq("term", record.term)
+            .eq("subject", record.subject)
+            .maybeSingle();
+          if (cloud.error) throw cloud.error;
+          if (pendingIsNewerOrEqual(change.updated_at, cloud.data?.updated_at)) {
+            const result = change.action === "upsert" && Object.keys(record.scores).length
+              ? await client.from("student_scores").upsert(
+                { ...record, scores: JSON.stringify(record.scores), school_id: change.school_id },
+                { onConflict: SCORE_CONFLICT_TARGET },
+              )
+              : await client
+                .from("student_scores")
+                .delete()
+                .eq("school_id", change.school_id)
+                .eq("student_id", record.student_id)
+                .eq("academic_year", record.academic_year)
+                .eq("term", record.term)
+                .eq("subject", record.subject);
+            if (result.error) throw result.error;
+          }
+        } else if (change.entity === "student") {
+          const record = change.record;
+          const cloud = await client
+            .from("students")
+            .select("updated_at")
+            .eq("school_id", change.school_id)
+            .eq("student_id", record.student_id)
+            .maybeSingle();
+          if (cloud.error) throw cloud.error;
+          if (pendingIsNewerOrEqual(change.updated_at, cloud.data?.updated_at)) {
+            const result = change.action === "upsert"
+              ? await client.from("students").upsert(
+                { ...record, school_id: change.school_id },
+                { onConflict: "student_id" },
+              )
+              : await client
+                .from("students")
+                .update({ is_deleted: true, updated_at: change.updated_at })
+                .eq("student_id", record.student_id)
+                .eq("school_id", change.school_id);
+            if (result.error) throw result.error;
+          }
+        }
+      } catch {
+        remaining.push(change);
+      }
+    }
+
+    await savePendingChanges(remaining);
+    return remaining.length === 0;
+  }, [client, loadPendingChanges, savePendingChanges]);
 
   useEffect(() => {
     AsyncStorage.getItem(cacheKey).then((raw) => {
@@ -205,6 +420,7 @@ export function DataProvider({ children }: PropsWithChildren) {
     }
     setSyncing(true);
     try {
+      const pendingFlushed = await flushPendingChanges();
       let activeSession = session;
       let studentRes = await client
         .from("students")
@@ -293,12 +509,16 @@ export function DataProvider({ children }: PropsWithChildren) {
       if (scoreRes.error || attendanceRes.error) {
         throw scoreRes.error ?? attendanceRes.error;
       }
-      const nextStudents = (studentRes.data ?? []) as Student[];
+      const pending = await loadPendingChanges();
+      const nextStudentsRaw = (studentRes.data ?? []) as Student[];
       const nextScores = (scoreRes.data ?? []).map((row: any) => ({
         ...row,
         scores: typeof row.scores === "string" ? JSON.parse(row.scores || "{}") : row.scores ?? {},
       })) as SubjectScore[];
-      const nextAttendance = (attendanceRes.data ?? []) as AttendanceRecord[];
+      const nextAttendanceRaw = (attendanceRes.data ?? []) as AttendanceRecord[];
+      const nextStudents = applyPendingStudents(nextStudentsRaw, pending, activeSession);
+      const nextScoresWithPending = applyPendingScores(nextScores, pending, activeSession);
+      const nextAttendance = applyPendingAttendance(nextAttendanceRaw, pending, activeSession);
       const settings = settingsRes.data as any;
       const nextSubjects = normalizeSubjects(settings?.subjects ?? settings?.settings?.subjects);
       const nextComponents = normalizeScoreComponents(settings?.score_components ?? settings?.settings?.score_components);
@@ -311,20 +531,20 @@ export function DataProvider({ children }: PropsWithChildren) {
       setAssessmentGroups(nextGroups);
       setGradingScale(nextGrading);
       setAttendanceTermStartDates(nextTermStarts);
-      setScores(nextScores);
+      setScores(nextScoresWithPending);
       setAttendance(nextAttendance);
-      setOnline(true);
-      setLastSyncError(null);
+      setOnline(pendingFlushed);
+      setLastSyncError(pendingFlushed ? null : "Some offline changes are pending upload.");
       const syncedAt = nowISO();
       setLastSyncedAt(syncedAt);
-      await cache({ students: nextStudents, subjects: nextSubjects, scoreComponents: nextComponents, assessmentGroups: nextGroups, gradingScale: nextGrading, attendanceTermStartDates: nextTermStarts, scores: nextScores, attendance: nextAttendance });
+      await cache({ students: nextStudents, subjects: nextSubjects, scoreComponents: nextComponents, assessmentGroups: nextGroups, gradingScale: nextGrading, attendanceTermStartDates: nextTermStarts, scores: nextScoresWithPending, attendance: nextAttendance });
     } catch (error) {
       setOnline(false);
       setLastSyncError(error instanceof Error ? error.message : "Sync failed.");
     } finally {
       setSyncing(false);
     }
-  }, [cache, client, session]);
+  }, [cache, client, flushPendingChanges, loadPendingChanges, session]);
 
   useEffect(() => {
     refresh();
@@ -378,40 +598,71 @@ export function DataProvider({ children }: PropsWithChildren) {
         const rest = prev.filter((item) => item.student_id !== studentId);
         return [...rest, student].sort((a, b) => a.student_name.localeCompare(b.student_name));
       });
-      await cache({
-        students: [...students.filter((item) => item.student_id !== studentId), student].sort((a, b) => a.student_name.localeCompare(b.student_name)),
-      });
+      const nextStudents = [...students.filter((item) => item.student_id !== studentId), student].sort((a, b) => a.student_name.localeCompare(b.student_name));
+      await cache({ students: nextStudents });
+      const pendingId = pendingStudentId(session.school_id, studentId);
       if (client) {
-        await client.from("students").upsert(
+        const result = await client.from("students").upsert(
           { ...student, school_id: session.school_id },
           { onConflict: "student_id" },
         );
+        if (result.error) {
+          await enqueuePendingChange({ id: pendingId, entity: "student", action: "upsert", school_id: session.school_id, record: student, updated_at: student.updated_at ?? nowISO() });
+          setOnline(false);
+          setLastSyncError(result.error.message);
+        } else {
+          await removePendingChange(pendingId);
+          setOnline(true);
+          setLastSyncError(null);
+        }
       }
       return student;
     },
-    [cache, client, session, students],
+    [cache, client, enqueuePendingChange, removePendingChange, session, students],
   );
 
   const deleteStudent = useCallback(
     async (studentId: string) => {
       const updatedAt = nowISO();
+      const existing = students.find((student) => student.student_id === studentId);
+      const tombstone: Student = {
+        ...(existing ?? {
+          student_id: studentId,
+          student_name: "",
+          gender: "",
+          grade: session.grade,
+          section: session.section,
+          academic_year: session.academic_year,
+        }),
+        is_deleted: true,
+        updated_at: updatedAt,
+      };
       setStudents((prev) => prev.filter((student) => student.student_id !== studentId));
       await cache({ students: students.filter((student) => student.student_id !== studentId) });
+      const pendingId = pendingStudentId(session.school_id, studentId);
       if (client) {
-        await client
+        const result = await client
           .from("students")
           .update({ is_deleted: true, updated_at: updatedAt })
           .eq("student_id", studentId)
           .eq("school_id", session.school_id);
+        if (result.error) {
+          await enqueuePendingChange({ id: pendingId, entity: "student", action: "delete", school_id: session.school_id, record: tombstone, updated_at: updatedAt });
+          setOnline(false);
+          setLastSyncError(result.error.message);
+        } else {
+          await removePendingChange(pendingId);
+          setOnline(true);
+          setLastSyncError(null);
+        }
       }
     },
-    [cache, client, session.school_id, students],
+    [cache, client, enqueuePendingChange, removePendingChange, session, students],
   );
 
   const upsertAttendance = useCallback(
     async (studentId: string, date: string, mark: AttendanceMark) => {
       const student = students.find((item) => item.student_id === studentId);
-      const previousAttendance = attendance;
       const record: AttendanceRecord = {
         attendance_id: makeAttendanceId(session.school_id, studentId, session.academic_year, session.term, date),
         student_id: studentId,
@@ -422,10 +673,14 @@ export function DataProvider({ children }: PropsWithChildren) {
         mark,
         updated_at: nowISO(),
       };
-      setAttendance((prev) => {
-        const rest = prev.filter((item) => !sameAttendancePeriod(item, studentId, session.academic_year, session.term, date));
+      const nextAttendance = (() => {
+        const rest = attendance.filter((item) => !sameAttendancePeriod(item, studentId, session.academic_year, session.term, date));
         return mark ? [...rest, record] : rest;
-      });
+      })();
+      setAttendance(nextAttendance);
+      await cache({ attendance: nextAttendance });
+      const pendingId = pendingAttendanceId(session.school_id, studentId, session.academic_year, session.term, date);
+      const pendingAction: "upsert" | "delete" = mark ? "upsert" : "delete";
       if (client) {
         const result = mark
           ? await client.from("daily_attendance").upsert(
@@ -441,16 +696,17 @@ export function DataProvider({ children }: PropsWithChildren) {
             .eq("term", session.term)
             .eq("attendance_date", date);
         if (result.error) {
-          setAttendance(previousAttendance);
+          await enqueuePendingChange({ id: pendingId, entity: "attendance", action: pendingAction, school_id: session.school_id, record, updated_at: record.updated_at });
           setLastSyncError(result.error.message);
           setOnline(false);
-          throw result.error;
+          return;
         }
+        await removePendingChange(pendingId);
         setOnline(true);
         setLastSyncError(null);
       }
     },
-    [attendance, client, session, students],
+    [attendance, cache, client, enqueuePendingChange, removePendingChange, session, students],
   );
 
   const bulkAttendance = useCallback(
@@ -469,28 +725,65 @@ export function DataProvider({ children }: PropsWithChildren) {
       const previousIds = new Set(records.map((record) => record.attendance_id));
       const removed = attendance.filter((record) => !previousIds.has(record.attendance_id));
       setAttendance(records);
+      await cache({ attendance: records });
       if (client) {
         if (records.length) {
-          await client.from("daily_attendance").upsert(
+          const result = await client.from("daily_attendance").upsert(
             records.map((record) => ({ ...record, school_id: session.school_id })),
             { onConflict: ATTENDANCE_CONFLICT_TARGET },
           );
+          if (result.error) {
+            for (const record of records) {
+              await enqueuePendingChange({
+                id: pendingAttendanceId(session.school_id, record.student_id, record.academic_year, record.term, record.attendance_date),
+                entity: "attendance",
+                action: "upsert",
+                school_id: session.school_id,
+                record,
+                updated_at: record.updated_at,
+              });
+            }
+            setOnline(false);
+            setLastSyncError(result.error.message);
+          } else {
+            for (const record of records) {
+              await removePendingChange(pendingAttendanceId(session.school_id, record.student_id, record.academic_year, record.term, record.attendance_date));
+            }
+          }
         }
         if (removed.length) {
-          await client.from("daily_attendance").delete().in(
+          const result = await client.from("daily_attendance").delete().in(
             "attendance_id",
             removed.map((record) => record.attendance_id),
           );
+          if (result.error) {
+            for (const record of removed) {
+              const tombstone = { ...record, mark: "" as AttendanceMark, updated_at: nowISO() };
+              await enqueuePendingChange({
+                id: pendingAttendanceId(session.school_id, record.student_id, record.academic_year, record.term, record.attendance_date),
+                entity: "attendance",
+                action: "delete",
+                school_id: session.school_id,
+                record: tombstone,
+                updated_at: tombstone.updated_at,
+              });
+            }
+            setOnline(false);
+            setLastSyncError(result.error.message);
+          } else {
+            for (const record of removed) {
+              await removePendingChange(pendingAttendanceId(session.school_id, record.student_id, record.academic_year, record.term, record.attendance_date));
+            }
+          }
         }
       }
     },
-    [attendance, client, session.school_id],
+    [attendance, cache, client, enqueuePendingChange, removePendingChange, session.school_id],
   );
 
   const upsertScore = useCallback(
     async (studentId: string, subject: string, field: string, value: number | null) => {
       const student = students.find((item) => item.student_id === studentId);
-      const previousScores = scores;
       const scoreId = makeScoreId(session.school_id, studentId, session.academic_year, session.term, subject);
       const existing = scores.find((item) => sameScorePeriod(item, studentId, session.academic_year, session.term, subject));
       const nextScores = { ...(existing?.scores ?? {}) };
@@ -506,10 +799,14 @@ export function DataProvider({ children }: PropsWithChildren) {
         scores: nextScores,
         updated_at: nowISO(),
       };
-      setScores((prev) => {
-        const rest = prev.filter((item) => !sameScorePeriod(item, studentId, session.academic_year, session.term, subject));
+      const nextScoreRows = (() => {
+        const rest = scores.filter((item) => !sameScorePeriod(item, studentId, session.academic_year, session.term, subject));
         return Object.keys(nextScores).length ? [...rest, nextRecord] : rest;
-      });
+      })();
+      setScores(nextScoreRows);
+      await cache({ scores: nextScoreRows });
+      const pendingId = pendingScoreId(session.school_id, studentId, session.academic_year, session.term, subject);
+      const pendingAction: "upsert" | "delete" = Object.keys(nextScores).length ? "upsert" : "delete";
       if (client) {
         const result = Object.keys(nextScores).length
           ? await client.from("student_scores").upsert(
@@ -525,16 +822,17 @@ export function DataProvider({ children }: PropsWithChildren) {
             .eq("term", session.term)
             .eq("subject", subject);
         if (result.error) {
-          setScores(previousScores);
+          await enqueuePendingChange({ id: pendingId, entity: "score", action: pendingAction, school_id: session.school_id, record: nextRecord, updated_at: nextRecord.updated_at });
           setLastSyncError(result.error.message);
           setOnline(false);
-          throw result.error;
+          return;
         }
+        await removePendingChange(pendingId);
         setOnline(true);
         setLastSyncError(null);
       }
     },
-    [client, scores, session, students],
+    [cache, client, enqueuePendingChange, removePendingChange, scores, session, students],
   );
 
   const value = useMemo<DataContextValue>(

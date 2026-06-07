@@ -162,10 +162,10 @@ begin
   else
     v_prefix := upper(regexp_replace(trim(p_school_name), '[^A-Za-z0-9]', '', 'g'));
     v_prefix := substring(coalesce(nullif(v_prefix, ''), 'SCH') from 1 for 5);
-    v_school_id := 'school_' || lower(replace(gen_random_uuid()::text, '-', ''));
+    v_school_id := 'school_' || lower(md5(random()::text || clock_timestamp()::text || trim(p_school_name)));
 
     loop
-      v_code := v_prefix || '-' || upper(substring(encode(gen_random_bytes(3), 'hex') from 1 for 6));
+      v_code := v_prefix || '-' || upper(substring(md5(random()::text || clock_timestamp()::text || v_prefix) from 1 for 6));
       exit when not exists (
         select 1 from public.school_mobile_directory where school_code = v_code
       );

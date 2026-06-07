@@ -16,6 +16,7 @@ create table if not exists public.school_settings (
   assessment_groups jsonb,
   score_components jsonb,
   role_permissions jsonb,
+  attendance_term_start_dates jsonb,
   subjects_updated_at timestamptz,
   conduct_options_updated_at timestamptz,
   talents_options_updated_at timestamptz,
@@ -27,6 +28,7 @@ create table if not exists public.school_settings (
   assessment_groups_updated_at timestamptz,
   score_components_updated_at timestamptz,
   role_permissions_updated_at timestamptz,
+  attendance_term_start_dates_updated_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -169,6 +171,9 @@ alter table public.school_settings
   add column if not exists role_permissions jsonb;
 
 alter table public.school_settings
+  add column if not exists attendance_term_start_dates jsonb;
+
+alter table public.school_settings
   add column if not exists subjects_updated_at timestamptz;
 
 alter table public.school_settings
@@ -200,6 +205,9 @@ alter table public.school_settings
 
 alter table public.school_settings
   add column if not exists role_permissions_updated_at timestamptz;
+
+alter table public.school_settings
+  add column if not exists attendance_term_start_dates_updated_at timestamptz;
 
 alter table public.students
   add column if not exists admission_number text;
@@ -270,13 +278,13 @@ update public.school_settings
  where grading_scale is null
    and settings ? 'grading_scale';
 
+drop index if exists uq_mobile_student_scores_student_period_subject;
 create unique index if not exists uq_mobile_student_scores_student_period_subject
-  on public.student_scores (student_id, academic_year, term, subject)
-  where student_id is not null;
+  on public.student_scores (school_id, student_id, academic_year, term, subject);
 
+drop index if exists uq_mobile_daily_attendance_student_period_date;
 create unique index if not exists uq_mobile_daily_attendance_student_period_date
-  on public.daily_attendance (student_id, academic_year, term, attendance_date)
-  where student_id is not null;
+  on public.daily_attendance (school_id, student_id, academic_year, term, attendance_date);
 
 alter table public.school_settings enable row level security;
 alter table public.students enable row level security;

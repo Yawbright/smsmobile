@@ -16,6 +16,7 @@ type DataContextValue = {
   scoreComponents: ScoreComponent[];
   assessmentGroups: Record<string, AssessmentGroup>;
   gradingScale: GradingScaleItem[];
+  attendanceTermStartDates: Record<string, string>;
   scores: SubjectScore[];
   attendance: AttendanceRecord[];
   isOnline: boolean;
@@ -33,6 +34,16 @@ type DataContextValue = {
 };
 
 const DataContext = createContext<DataContextValue | null>(null);
+const SCORE_CONFLICT_TARGET = "school_id,student_id,academic_year,term,subject";
+const ATTENDANCE_CONFLICT_TARGET = "school_id,student_id,academic_year,term,attendance_date";
+
+function sameScorePeriod(record: SubjectScore, studentId: string, academicYear: string, term: string, subject: string) {
+  return record.student_id === studentId && record.academic_year === academicYear && record.term === term && record.subject === subject;
+}
+
+function sameAttendancePeriod(record: AttendanceRecord, studentId: string, academicYear: string, term: string, date: string) {
+  return record.student_id === studentId && record.academic_year === academicYear && record.term === term && record.attendance_date === date;
+}
 
 function parseSetting<T>(value: unknown, fallback: T): T {
   if (typeof value === "string") {
@@ -133,6 +144,7 @@ export function DataProvider({ children }: PropsWithChildren) {
   const [scoreComponents, setScoreComponents] = useState<ScoreComponent[]>([]);
   const [assessmentGroups, setAssessmentGroups] = useState<Record<string, AssessmentGroup>>({});
   const [gradingScale, setGradingScale] = useState<GradingScaleItem[]>([]);
+  const [attendanceTermStartDates, setAttendanceTermStartDates] = useState<Record<string, string>>({});
   const [scores, setScores] = useState<SubjectScore[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [isSyncing, setSyncing] = useState(false);
@@ -146,7 +158,7 @@ export function DataProvider({ children }: PropsWithChildren) {
 
   const cacheKey = client ? makeDataCacheKey(session.school_id) : DEMO_CACHE_KEY;
 
-  const cache = useCallback(async (payload: Partial<Pick<DataContextValue, "students" | "subjects" | "scores" | "attendance" | "scoreComponents" | "assessmentGroups" | "gradingScale">>) => {
+  const cache = useCallback(async (payload: Partial<Pick<DataContextValue, "students" | "subjects" | "scores" | "attendance" | "scoreComponents" | "assessmentGroups" | "gradingScale" | "attendanceTermStartDates">>) => {
     const raw = await AsyncStorage.getItem(cacheKey);
     const previous = raw ? JSON.parse(raw) as Record<string, unknown> : {};
     await AsyncStorage.setItem(cacheKey, JSON.stringify({ ...previous, ...payload }));
@@ -162,6 +174,7 @@ export function DataProvider({ children }: PropsWithChildren) {
         setScoreComponents([]);
         setAssessmentGroups({});
         setGradingScale([]);
+        setAttendanceTermStartDates({});
         return;
       }
       const cached = JSON.parse(raw) as {
@@ -172,12 +185,14 @@ export function DataProvider({ children }: PropsWithChildren) {
         scoreComponents?: ScoreComponent[];
         assessmentGroups?: Record<string, AssessmentGroup>;
         gradingScale?: GradingScaleItem[];
+        attendanceTermStartDates?: Record<string, string>;
       };
       if (cached.students?.length) setStudents(cached.students);
       if (cached.subjects?.length) setSubjects(cached.subjects);
       if (cached.scoreComponents?.length) setScoreComponents(cached.scoreComponents);
       if (cached.assessmentGroups) setAssessmentGroups(cached.assessmentGroups);
       if (cached.gradingScale?.length) setGradingScale(cached.gradingScale);
+      if (cached.attendanceTermStartDates) setAttendanceTermStartDates(cached.attendanceTermStartDates);
       if (cached.scores) setScores(cached.scores);
       if (cached.attendance) setAttendance(cached.attendance);
     });
@@ -271,7 +286,7 @@ export function DataProvider({ children }: PropsWithChildren) {
           .eq("term", activeSession.term),
         client
           .from("school_settings")
-          .select("subjects,score_components,assessment_groups,grading_scale,settings")
+          .select("subjects,score_components,assessment_groups,grading_scale,attendance_term_start_dates,settings")
           .eq("school_id", activeSession.school_id)
           .maybeSingle(),
       ]);
@@ -289,18 +304,20 @@ export function DataProvider({ children }: PropsWithChildren) {
       const nextComponents = normalizeScoreComponents(settings?.score_components ?? settings?.settings?.score_components);
       const nextGroups = normalizeAssessmentGroups(settings?.assessment_groups ?? settings?.settings?.assessment_groups);
       const nextGrading = normalizeGradingScale(settings?.grading_scale ?? settings?.settings?.grading_scale);
+      const nextTermStarts = parseSetting<Record<string, string>>(settings?.attendance_term_start_dates ?? settings?.settings?.attendance_term_start_dates, {});
       setStudents(nextStudents);
       setSubjects(nextSubjects);
       setScoreComponents(nextComponents);
       setAssessmentGroups(nextGroups);
       setGradingScale(nextGrading);
+      setAttendanceTermStartDates(nextTermStarts);
       setScores(nextScores);
       setAttendance(nextAttendance);
       setOnline(true);
       setLastSyncError(null);
       const syncedAt = nowISO();
       setLastSyncedAt(syncedAt);
-      await cache({ students: nextStudents, subjects: nextSubjects, scoreComponents: nextComponents, assessmentGroups: nextGroups, gradingScale: nextGrading, scores: nextScores, attendance: nextAttendance });
+      await cache({ students: nextStudents, subjects: nextSubjects, scoreComponents: nextComponents, assessmentGroups: nextGroups, gradingScale: nextGrading, attendanceTermStartDates: nextTermStarts, scores: nextScores, attendance: nextAttendance });
     } catch (error) {
       setOnline(false);
       setLastSyncError(error instanceof Error ? error.message : "Sync failed.");
@@ -324,6 +341,7 @@ export function DataProvider({ children }: PropsWithChildren) {
     setScoreComponents(SCORE_COMPONENTS);
     setAssessmentGroups(ASSESSMENT_GROUPS);
     setGradingScale(GRADING_SCALE);
+    setAttendanceTermStartDates({});
     setScores(demoScores);
     setAttendance(demoAttendance);
     setLastSyncError(null);
@@ -333,6 +351,7 @@ export function DataProvider({ children }: PropsWithChildren) {
       scoreComponents: SCORE_COMPONENTS,
       assessmentGroups: ASSESSMENT_GROUPS,
       gradingScale: GRADING_SCALE,
+      attendanceTermStartDates: {},
       scores: demoScores,
       attendance: demoAttendance,
     });
@@ -403,14 +422,25 @@ export function DataProvider({ children }: PropsWithChildren) {
         updated_at: nowISO(),
       };
       setAttendance((prev) => {
-        const rest = prev.filter((item) => item.attendance_id !== record.attendance_id);
+        const rest = prev.filter((item) => !sameAttendancePeriod(item, studentId, session.academic_year, session.term, date));
         return mark ? [...rest, record] : rest;
       });
       if (client) {
-        await client.from("daily_attendance").upsert(
-          { ...record, school_id: session.school_id },
-          { onConflict: "attendance_id" },
-        );
+        if (mark) {
+          await client.from("daily_attendance").upsert(
+            { ...record, school_id: session.school_id },
+            { onConflict: ATTENDANCE_CONFLICT_TARGET },
+          );
+        } else {
+          await client
+            .from("daily_attendance")
+            .delete()
+            .eq("school_id", session.school_id)
+            .eq("student_id", studentId)
+            .eq("academic_year", session.academic_year)
+            .eq("term", session.term)
+            .eq("attendance_date", date);
+        }
       }
     },
     [client, session, students],
@@ -436,7 +466,7 @@ export function DataProvider({ children }: PropsWithChildren) {
         if (records.length) {
           await client.from("daily_attendance").upsert(
             records.map((record) => ({ ...record, school_id: session.school_id })),
-            { onConflict: "attendance_id" },
+            { onConflict: ATTENDANCE_CONFLICT_TARGET },
           );
         }
         if (removed.length) {
@@ -454,7 +484,7 @@ export function DataProvider({ children }: PropsWithChildren) {
     async (studentId: string, subject: string, field: string, value: number | null) => {
       const student = students.find((item) => item.student_id === studentId);
       const scoreId = makeScoreId(session.school_id, studentId, session.academic_year, session.term, subject);
-      const existing = scores.find((item) => item.score_id === scoreId);
+      const existing = scores.find((item) => sameScorePeriod(item, studentId, session.academic_year, session.term, subject));
       const nextScores = { ...(existing?.scores ?? {}) };
       if (value === null) delete nextScores[field];
       else nextScores[field] = value;
@@ -469,17 +499,24 @@ export function DataProvider({ children }: PropsWithChildren) {
         updated_at: nowISO(),
       };
       setScores((prev) => {
-        const rest = prev.filter((item) => item.score_id !== scoreId);
+        const rest = prev.filter((item) => !sameScorePeriod(item, studentId, session.academic_year, session.term, subject));
         return Object.keys(nextScores).length ? [...rest, nextRecord] : rest;
       });
       if (client) {
         if (Object.keys(nextScores).length) {
           await client.from("student_scores").upsert(
             { ...nextRecord, scores: JSON.stringify(nextRecord.scores), school_id: session.school_id },
-            { onConflict: "score_id" },
+            { onConflict: SCORE_CONFLICT_TARGET },
           );
         } else {
-          await client.from("student_scores").delete().eq("score_id", scoreId);
+          await client
+            .from("student_scores")
+            .delete()
+            .eq("school_id", session.school_id)
+            .eq("student_id", studentId)
+            .eq("academic_year", session.academic_year)
+            .eq("term", session.term)
+            .eq("subject", subject);
         }
       }
     },
@@ -495,6 +532,7 @@ export function DataProvider({ children }: PropsWithChildren) {
       scoreComponents,
       assessmentGroups,
       gradingScale,
+      attendanceTermStartDates,
       scores,
       attendance,
       isOnline,
@@ -510,7 +548,7 @@ export function DataProvider({ children }: PropsWithChildren) {
       replaceAttendance,
       upsertScore,
     }),
-    [assessmentGroups, attendance, bulkAttendance, deleteStudent, gradingScale, isOnline, isSyncing, lastSyncError, lastSyncedAt, refresh, replaceAttendance, saveStudent, scoreComponents, scores, seedDemoData, session, setSession, students, subjects, upsertAttendance, upsertScore],
+    [assessmentGroups, attendance, attendanceTermStartDates, bulkAttendance, deleteStudent, gradingScale, isOnline, isSyncing, lastSyncError, lastSyncedAt, refresh, replaceAttendance, saveStudent, scoreComponents, scores, seedDemoData, session, setSession, students, subjects, upsertAttendance, upsertScore],
   );
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

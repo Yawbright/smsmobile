@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Pressable, Text } from "react-native";
 import { StyleSheet, View } from "react-native";
 
-import { CURRENT_YEAR, GRADES, SECTIONS, TERMS } from "../constants/school";
+import { CURRENT_YEAR, GRADES, STREAMS, TERMS } from "../constants/school";
 import { colors, spacing } from "../constants/theme";
 import { useData } from "../providers/DataProvider";
 import { SelectMenu } from "./SelectMenu";
@@ -35,7 +35,7 @@ export function SessionBar() {
         <View style={styles.context}>
           <Ionicons name="filter-outline" size={16} color={colors.muted} />
           <Text numberOfLines={1} style={styles.contextText}>
-            {session.grade} {session.section} - {session.term} - {session.academic_year}
+            {session.grade}{session.stream} - {session.term} - {session.academic_year}
           </Text>
         </View>
         <Pressable onPress={() => toggleCollapsed(false)} style={styles.changeButton}>
@@ -59,9 +59,9 @@ export function SessionBar() {
         compact
         inlineLabel
         label="Stream"
-        value={session.section}
-        options={SECTIONS.map((section) => ({ label: section, value: section }))}
-        onChange={(section) => setAndRefresh({ section })}
+        value={session.stream}
+        options={STREAMS.map((stream) => ({ label: stream, value: stream }))}
+        onChange={(stream) => setAndRefresh({ stream })}
       />
       <SelectMenu
         compact

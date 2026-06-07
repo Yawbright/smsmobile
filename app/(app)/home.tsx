@@ -25,7 +25,7 @@ export default function HomeScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.content}>
-      <SectionHeader title="Today" detail={`${session.grade} ${session.section} - ${session.term}`} />
+      <SectionHeader title="Today" detail={`${session.grade}${session.stream} - ${session.term}`} />
       <View style={styles.grid}>
         <Stat width={statWidth} title="Students" value={String(students.length)} icon="people-outline" />
         <Stat width={statWidth} title="Marked today" value={`${marked}/${students.length}`} icon="calendar-outline" />
@@ -43,7 +43,7 @@ export default function HomeScreen() {
       <Card style={styles.context}>
         <Text style={styles.cardTitle}>Current context</Text>
         <Text style={styles.line}>Academic year: {session.academic_year}</Text>
-        <Text style={styles.line}>Class: {session.grade} {session.section}</Text>
+        <Text style={styles.line}>Class: {session.grade}{session.stream}</Text>
         <Text style={styles.line}>Role: {user?.role.replace("_", " ")}</Text>
         <View style={styles.teacherCodeBox}>
           <View style={styles.teacherCodeText}>

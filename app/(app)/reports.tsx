@@ -48,7 +48,7 @@ export default function ReportsScreen() {
             <Text style={styles.meta}>
               {selected.admission_number ? `Admission No: ${selected.admission_number}` : `Student ID: ${selected.student_id}`}
             </Text>
-            <Text style={styles.meta}>{selected.grade} {selected.section} - {session.term} - {session.academic_year}</Text>
+            <Text style={styles.meta}>{selected.grade}{selected.stream} - {session.term} - {session.academic_year}</Text>
             <View style={styles.summaryGrid}>
               <Metric label="Total" value={report.subjectsScored ? String(report.total) : "No scores"} />
               <Metric label="Average" value={report.subjectsScored ? String(report.average) : "No scores"} />

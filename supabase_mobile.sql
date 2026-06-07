@@ -52,7 +52,7 @@ create table if not exists public.students (
   class_teacher_remark text,
   head_teacher_remark text,
   grade text not null default '',
-  section text not null default '',
+  stream text not null default '',
   academic_year text not null default '',
   is_deleted boolean not null default false,
   created_at timestamptz not null default now(),
@@ -109,7 +109,7 @@ create table if not exists public.subject_teachers (
   teacher_name text not null default '',
   subject text not null default '',
   grade text not null default '',
-  section text not null default '',
+  stream text not null default '',
   academic_year text not null default '',
   is_deleted boolean not null default false,
   created_at timestamptz not null default now(),
@@ -218,17 +218,63 @@ alter table public.students
 alter table public.students
   add column if not exists department text;
 
+alter table public.students
+  add column if not exists stream text not null default '';
+
+do $$
+begin
+  if exists (
+    select 1
+      from information_schema.columns
+     where table_schema = 'public'
+       and table_name = 'students'
+       and column_name = 'section'
+  ) then
+    update public.students
+       set stream = section
+     where (stream is null or stream = '')
+       and section is not null
+       and section <> '';
+  end if;
+end $$;
+
+alter table public.students
+  drop column if exists section;
+
 alter table public.school_users
   add column if not exists school_id text not null default '';
 
 alter table public.subject_teachers
   add column if not exists school_id text not null default '';
 
+alter table public.subject_teachers
+  add column if not exists stream text not null default '';
+
+do $$
+begin
+  if exists (
+    select 1
+      from information_schema.columns
+     where table_schema = 'public'
+       and table_name = 'subject_teachers'
+       and column_name = 'section'
+  ) then
+    update public.subject_teachers
+       set stream = section
+     where (stream is null or stream = '')
+       and section is not null
+       and section <> '';
+  end if;
+end $$;
+
+alter table public.subject_teachers
+  drop column if exists section;
+
 create unique index if not exists uq_mobile_school_settings_school_id
   on public.school_settings (school_id);
 
 create index if not exists idx_mobile_students_school_class
-  on public.students (school_id, academic_year, grade, section);
+  on public.students (school_id, academic_year, grade, stream);
 
 create index if not exists idx_mobile_scores_school_period
   on public.student_scores (school_id, academic_year, term);
@@ -243,7 +289,7 @@ create unique index if not exists uq_mobile_school_users_school_username
   on public.school_users (school_id, lower(username));
 
 create index if not exists idx_mobile_subject_teachers_school
-  on public.subject_teachers (school_id, academic_year, grade, section);
+  on public.subject_teachers (school_id, academic_year, grade, stream);
 
 update public.student_scores
    set score_id = school_id || '|score|' || student_id || '|' || academic_year || '|' || term || '|' || subject

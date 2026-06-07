@@ -106,7 +106,7 @@ function applyPendingStudents(cloudStudents: Student[], pending: PendingChange[]
   for (const change of pending) {
     if (change.entity !== "student" || change.school_id !== session.school_id) continue;
     const local = change.record;
-    if (local.academic_year !== session.academic_year || local.grade !== session.grade || local.section !== session.section) continue;
+    if (local.academic_year !== session.academic_year || local.grade !== session.grade || local.stream !== session.stream) continue;
     const existing = next.find((student) => student.student_id === local.student_id);
     if (!pendingIsNewerOrEqual(change.updated_at, existing?.updated_at)) continue;
     next = next.filter((student) => student.student_id !== local.student_id);
@@ -238,7 +238,7 @@ export function DataProvider({ children }: PropsWithChildren) {
     academic_year: CURRENT_YEAR,
     term: "First Term",
     grade: "JHS 1",
-    section: "A",
+    stream: "A",
   });
   const [students, setStudents] = useState<Student[]>([]);
   const [subjects, setSubjects] = useState<string[]>([]);
@@ -487,7 +487,7 @@ export function DataProvider({ children }: PropsWithChildren) {
         .eq("school_id", activeSession.school_id)
         .eq("academic_year", activeSession.academic_year)
         .eq("grade", activeSession.grade)
-        .eq("section", activeSession.section)
+        .eq("stream", activeSession.stream)
         .eq("is_deleted", false)
         .order("student_name");
       if (studentRes.error) throw studentRes.error;
@@ -643,7 +643,7 @@ export function DataProvider({ children }: PropsWithChildren) {
         house: draft.house?.trim(),
         department: draft.department?.trim(),
         grade: session.grade,
-        section: session.section,
+        stream: session.stream,
         academic_year: session.academic_year,
         is_deleted: false,
         updated_at: nowISO(),
@@ -685,7 +685,7 @@ export function DataProvider({ children }: PropsWithChildren) {
           student_name: "",
           gender: "",
           grade: session.grade,
-          section: session.section,
+          stream: session.stream,
           academic_year: session.academic_year,
         }),
         is_deleted: true,

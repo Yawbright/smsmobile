@@ -22,7 +22,7 @@ export type SessionContext = {
   academic_year: string;
   term: string;
   grade: string;
-  section: string;
+  stream: string;
 };
 
 export type Student = {
@@ -35,7 +35,7 @@ export type Student = {
   parent_name?: string;
   parent_contact?: string;
   grade: string;
-  section: string;
+  stream: string;
   academic_year: string;
   days_present?: number;
   total_school_days?: number;

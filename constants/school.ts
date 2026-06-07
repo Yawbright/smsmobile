@@ -4,7 +4,7 @@ export const TERMS = ["First Term", "Second Term", "Third Term"];
 
 export const GRADES = ["JHS 1", "JHS 2", "JHS 3"];
 
-export const SECTIONS = ["A", "B", "C"];
+export const STREAMS = ["A", "B", "C"];
 
 export const SUBJECTS = [
   "English Language",

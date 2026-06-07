@@ -51,6 +51,15 @@ function nextMark(mark: AttendanceMark) {
   return markCycle[(current + 1) % markCycle.length];
 }
 
+function calendarWeekLabel(weekStart: string) {
+  const currentWeek = startOfWeek(todayISO());
+  const delta = Math.round((parseISODate(weekStart).getTime() - parseISODate(currentWeek).getTime()) / 604800000);
+  if (delta === 0) return "This week";
+  if (delta === -1) return "Last week";
+  if (delta === 1) return "Next week";
+  return `${shortDate(weekStart)} - ${shortDate(addDays(weekStart, 4))}`;
+}
+
 export default function AttendanceScreen() {
   const { students, attendance, attendanceTermStartDates, session, upsertAttendance, replaceAttendance } = useData();
   const [weekStart, setWeekStart] = useState(startOfWeek(todayISO()));
@@ -106,8 +115,7 @@ export default function AttendanceScreen() {
     }
   }, [attendance, weekDates]);
 
-  const jumpToTermWeek = (week: number) => setWeekStart(addDays(termWeekStart, (week - 1) * 7));
-  const jumpToRelativeWeek = (offset: number) => setWeekStart(startOfWeek(addDays(todayISO(), offset * 7)));
+  const shiftWeek = (weeks: number) => setWeekStart((current) => addDays(current, weeks * 7));
 
   const markSingle = async (studentId: string, date: string) => {
     const selected = recordsByCell.get(`${studentId}|${date}`)?.mark ?? "";
@@ -146,27 +154,28 @@ export default function AttendanceScreen() {
     <ScrollView contentContainerStyle={styles.content}>
       <SectionHeader title="Attendance" detail={`${markedCount}/${students.length * weekDates.length} marked`} />
       <Card style={styles.toolbar}>
-        <View style={styles.weekRow}>
+        <View style={styles.navRow}>
+          <Pressable onPress={() => shiftWeek(-1)} style={styles.arrowButton}>
+            <Text style={styles.arrowText}>{"<"}</Text>
+          </Pressable>
           <View style={styles.weekLabel}>
-            <Text style={styles.weekText}>Week {weekNumber}</Text>
+            <Text style={styles.weekText}>{calendarWeekLabel(weekStart)}</Text>
             <Text style={styles.weekMeta}>{shortDate(weekDates[0])} - {shortDate(weekDates[4])}</Text>
           </View>
-        </View>
-        <View style={styles.weekJumpRow}>
-          {[1, 2, 3].map((week) => (
-            <Pressable
-              key={week}
-              onPress={() => jumpToTermWeek(week)}
-              style={[styles.navButton, weekNumber === week && styles.navButtonActive]}
-            >
-              <Text style={[styles.buttonText, weekNumber === week && styles.buttonTextActive]}>Week {week}</Text>
-            </Pressable>
-          ))}
-          <Pressable onPress={() => jumpToRelativeWeek(-1)} style={styles.navButton}>
-            <Text style={styles.buttonText}>Last week</Text>
+          <Pressable onPress={() => shiftWeek(1)} style={styles.arrowButton}>
+            <Text style={styles.arrowText}>{">"}</Text>
           </Pressable>
-          <Pressable onPress={() => jumpToRelativeWeek(0)} style={styles.navButton}>
-            <Text style={styles.buttonText}>This week</Text>
+        </View>
+        <View style={styles.navRow}>
+          <Pressable onPress={() => shiftWeek(-1)} style={styles.arrowButton}>
+            <Text style={styles.arrowText}>{"<"}</Text>
+          </Pressable>
+          <View style={styles.termWeekButton}>
+            <Text style={styles.weekText}>Week {weekNumber}</Text>
+            <Text style={styles.weekMeta}>from term start</Text>
+          </View>
+          <Pressable onPress={() => shiftWeek(1)} style={styles.arrowButton}>
+            <Text style={styles.arrowText}>{">"}</Text>
           </Pressable>
         </View>
         <View style={styles.actionRow}>
@@ -183,46 +192,42 @@ export default function AttendanceScreen() {
       </Card>
 
       {students.length ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={styles.table}>
-            <View style={styles.headerRow}>
-              <View style={styles.studentHeader}>
-                <Text style={styles.headerText}>Student</Text>
+        <View style={styles.list}>
+          <View style={styles.dayGridHeader}>
+            {weekDates.map((date, index) => (
+              <View key={date} style={styles.dayHeader}>
+                <Text style={styles.headerText}>{weekLabels[index]}</Text>
+                <Text style={styles.dateHeader}>{shortDate(date)}</Text>
               </View>
-              {weekDates.map((date, index) => (
-                <View key={date} style={styles.dayHeader}>
-                  <Text style={styles.headerText}>{weekLabels[index]}</Text>
-                  <Text style={styles.dateHeader}>{shortDate(date)}</Text>
-                </View>
-              ))}
-            </View>
-
+            ))}
+          </View>
             {students.map((student) => (
               <Card key={student.student_id} style={styles.tableRow}>
                 <View style={styles.studentCell}>
                   <Text style={styles.name}>{student.student_name}</Text>
                   <Text style={styles.meta}>{student.admission_number ?? student.student_id}</Text>
                 </View>
-                {weekDates.map((date) => {
-                  const mark = recordsByCell.get(`${student.student_id}|${date}`)?.mark ?? "";
-                  const style = mark ? markStyles[mark] : null;
-                  return (
-                    <Pressable
-                      key={`${student.student_id}-${date}`}
-                      onPress={() => markSingle(student.student_id, date)}
-                      style={[
-                        styles.markCell,
-                        style ? { backgroundColor: style.bg, borderColor: style.border } : null,
-                      ]}
-                    >
-                      <Text style={[styles.markText, style ? { color: style.text } : null]}>{mark || "-"}</Text>
-                    </Pressable>
-                  );
-                })}
+                <View style={styles.dayGrid}>
+                  {weekDates.map((date) => {
+                    const mark = recordsByCell.get(`${student.student_id}|${date}`)?.mark ?? "";
+                    const style = mark ? markStyles[mark] : null;
+                    return (
+                      <Pressable
+                        key={`${student.student_id}-${date}`}
+                        onPress={() => markSingle(student.student_id, date)}
+                        style={[
+                          styles.markCell,
+                          style ? { backgroundColor: style.bg, borderColor: style.border } : null,
+                        ]}
+                      >
+                        <Text style={[styles.markText, style ? { color: style.text } : null]}>{mark || "-"}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
               </Card>
             ))}
-          </View>
-        </ScrollView>
+        </View>
       ) : (
         <EmptyState title="No students" body="Pick a class that has active students." />
       )}
@@ -233,24 +238,31 @@ export default function AttendanceScreen() {
 const styles = StyleSheet.create({
   content: { gap: spacing.lg, padding: spacing.lg, paddingBottom: 96 },
   toolbar: { gap: spacing.md },
-  weekRow: { alignItems: "center", flexDirection: "row", gap: spacing.sm, justifyContent: "space-between" },
-  weekJumpRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  navButton: {
+  navRow: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
+  arrowButton: {
     alignItems: "center",
     borderColor: colors.border,
     borderRadius: radius.sm,
     borderWidth: 1,
     justifyContent: "center",
-    minHeight: 42,
-    minWidth: 82,
-    paddingHorizontal: spacing.sm,
+    height: 42,
+    width: 42,
   },
-  navButtonActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  buttonText: { color: colors.text, fontSize: 13, fontWeight: "600" },
-  buttonTextActive: { color: "#FFFFFF" },
+  arrowText: { color: colors.text, fontSize: 18, fontWeight: "800" },
   weekLabel: { alignItems: "center", flex: 1, gap: 2, minWidth: 130 },
   weekText: { color: colors.text, fontSize: 16, fontWeight: "700", textAlign: "center" },
   weekMeta: { color: colors.muted, fontSize: 11, textAlign: "center" },
+  termWeekButton: {
+    alignItems: "center",
+    backgroundColor: colors.cardAlt,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    flex: 1,
+    gap: 2,
+    justifyContent: "center",
+    minHeight: 42,
+  },
   actionRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   primaryButton: {
     backgroundColor: colors.primary,
@@ -271,9 +283,8 @@ const styles = StyleSheet.create({
   },
   secondaryText: { color: colors.text, fontSize: 13, fontWeight: "600" },
   disabled: { opacity: 0.45 },
-  table: { gap: spacing.sm, minWidth: 470 },
-  headerRow: { flexDirection: "row", gap: spacing.sm, paddingHorizontal: 1 },
-  studentHeader: { justifyContent: "center", width: 160 },
+  list: { gap: spacing.sm },
+  dayGridHeader: { flexDirection: "row", gap: 4, paddingHorizontal: spacing.sm },
   dayHeader: {
     alignItems: "center",
     backgroundColor: colors.cardAlt,
@@ -281,25 +292,28 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     borderWidth: 1,
     gap: 2,
+    flex: 1,
     justifyContent: "center",
-    minHeight: 48,
-    width: 58,
+    minHeight: 42,
+    minWidth: 0,
   },
   headerText: { color: colors.text, fontSize: 12, fontWeight: "700" },
-  dateHeader: { color: colors.muted, fontSize: 10, fontWeight: "500" },
-  tableRow: { alignItems: "center", flexDirection: "row", gap: spacing.sm, padding: spacing.sm },
-  studentCell: { justifyContent: "center", minHeight: 52, width: 150 },
+  dateHeader: { color: colors.muted, fontSize: 9, fontWeight: "500" },
+  tableRow: { gap: spacing.sm, padding: spacing.sm },
+  studentCell: { justifyContent: "center", minHeight: 34 },
   name: { color: colors.text, fontSize: 14, fontWeight: "700" },
   meta: { color: colors.muted, fontSize: 11, fontWeight: "400" },
+  dayGrid: { flexDirection: "row", gap: 4 },
   markCell: {
     alignItems: "center",
     backgroundColor: colors.bg,
     borderColor: colors.border,
     borderRadius: radius.sm,
     borderWidth: 1,
-    height: 46,
+    flex: 1,
+    height: 42,
     justifyContent: "center",
-    width: 58,
+    minWidth: 0,
   },
   markText: { color: colors.muted, fontSize: 15, fontWeight: "800" },
 });

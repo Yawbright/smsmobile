@@ -221,26 +221,6 @@ alter table public.students
 alter table public.students
   add column if not exists stream text not null default '';
 
-do $$
-begin
-  if exists (
-    select 1
-      from information_schema.columns
-     where table_schema = 'public'
-       and table_name = 'students'
-       and column_name = 'section'
-  ) then
-    update public.students
-       set stream = section
-     where (stream is null or stream = '')
-       and section is not null
-       and section <> '';
-  end if;
-end $$;
-
-alter table public.students
-  drop column if exists section;
-
 alter table public.school_users
   add column if not exists school_id text not null default '';
 
@@ -249,26 +229,6 @@ alter table public.subject_teachers
 
 alter table public.subject_teachers
   add column if not exists stream text not null default '';
-
-do $$
-begin
-  if exists (
-    select 1
-      from information_schema.columns
-     where table_schema = 'public'
-       and table_name = 'subject_teachers'
-       and column_name = 'section'
-  ) then
-    update public.subject_teachers
-       set stream = section
-     where (stream is null or stream = '')
-       and section is not null
-       and section <> '';
-  end if;
-end $$;
-
-alter table public.subject_teachers
-  drop column if exists section;
 
 create unique index if not exists uq_mobile_school_settings_school_id
   on public.school_settings (school_id);

@@ -1,4 +1,4 @@
-const { centralClient, method, requireAdmin } = require("./_admin");
+const { centralClient, method, requireAdmin } = require("../api-lib/admin");
 
 module.exports = async function handler(req, res) {
   if (!requireAdmin(req, res) || !method(req, res, ["GET"])) return;

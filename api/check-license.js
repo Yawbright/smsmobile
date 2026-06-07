@@ -1,4 +1,4 @@
-const { centralClient, method } = require("./_admin");
+const { centralClient, method } = require("../api-lib/admin");
 
 function parseList(value) {
   if (Array.isArray(value)) return value;

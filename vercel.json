@@ -1,11 +1,29 @@
 {
-  "buildCommand": "npm run build:web",
-  "outputDirectory": "dist",
-  "framework": null,
-  "rewrites": [
+  "version": 2,
+  "builds": [
     {
-      "source": "/((?!api/).*)",
-      "destination": "/index.html"
+      "src": "api/**/*.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1.js"
+    },
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
     }
   ]
 }

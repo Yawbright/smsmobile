@@ -28,6 +28,12 @@ type SupabaseContextValue = {
 
 const SupabaseContext = createContext<SupabaseContextValue | null>(null);
 
+async function clearDataCaches() {
+  const keys = await AsyncStorage.getAllKeys();
+  const cacheKeys = keys.filter((key) => key === DEMO_CACHE_KEY || key.startsWith("oterkpolu.mobile.cache.school."));
+  await Promise.all(cacheKeys.map((key) => AsyncStorage.removeItem(key)));
+}
+
 async function saveSchoolIdentity(config: SupabaseRuntimeConfig) {
   if (!hasConfig(config) || !config.schoolCode) return;
   try {
@@ -84,16 +90,14 @@ export function SupabaseProvider({ children }: PropsWithChildren) {
         cleaned = result.config;
         const message = `Registration submitted. School code: ${cleaned.schoolCode}. Status: ${result.status}.`;
 
-        await AsyncStorage.removeItem(DEMO_CACHE_KEY);
+        await clearDataCaches();
         await saveStoredSupabaseConfig(cleaned);
         setConfig(cleaned);
         return { config: cleaned, message };
       },
       async clearConfig() {
         await clearStoredSupabaseConfig();
-        const keys = await AsyncStorage.getAllKeys();
-        const cacheKeys = keys.filter((key) => key === DEMO_CACHE_KEY || key.startsWith("oterkpolu.mobile.cache.school."));
-        await Promise.all(cacheKeys.map((key) => AsyncStorage.removeItem(key)));
+        await clearDataCaches();
         setConfig(envSupabaseConfig);
       },
       async testConfig(nextConfig) {
@@ -116,7 +120,7 @@ export function SupabaseProvider({ children }: PropsWithChildren) {
       async setupWithSchoolCode(schoolCode) {
         try {
           const result = await lookupSchoolCode(schoolCode);
-          await AsyncStorage.removeItem(DEMO_CACHE_KEY);
+          await clearDataCaches();
           await saveStoredSupabaseConfig(result.config);
           await saveSchoolIdentity(result.config);
           setConfig(result.config);

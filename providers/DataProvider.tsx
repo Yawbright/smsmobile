@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { createContext, PropsWithChildren, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
-import { ASSESSMENT_GROUPS, CURRENT_YEAR, GRADING_SCALE, SCORE_COMPONENTS } from "../constants/school";
+import { ASSESSMENT_GROUPS, CURRENT_YEAR, GRADING_SCALE, SCORE_COMPONENTS, SUBJECTS } from "../constants/school";
 import { demoAttendance, demoScores, demoStudents } from "../lib/demoData";
 import { makeAttendanceId, makeMobileStudentId, makeScoreId, nowISO, todayISO } from "../lib/ids";
 import { DEMO_CACHE_KEY, makeDataCacheKey } from "../lib/cacheKeys";
@@ -12,6 +12,7 @@ type DataContextValue = {
   session: SessionContext;
   setSession: (next: Partial<SessionContext>) => void;
   students: Student[];
+  subjects: string[];
   scoreComponents: ScoreComponent[];
   assessmentGroups: Record<string, AssessmentGroup>;
   gradingScale: GradingScaleItem[];
@@ -42,6 +43,80 @@ function parseSetting<T>(value: unknown, fallback: T): T {
   return (value ?? fallback) as T;
 }
 
+function normalizeSubjects(value: unknown) {
+  const raw = parseSetting<unknown>(value, null);
+  if (!Array.isArray(raw)) return SUBJECTS;
+  const subjects = raw
+    .map((item) => {
+      if (typeof item === "string") return item.trim();
+      if (item && typeof item === "object") {
+        const record = item as Record<string, unknown>;
+        return String(record.name ?? record.label ?? record.subject ?? "").trim();
+      }
+      return "";
+    })
+    .filter(Boolean);
+  return subjects.length ? subjects : SUBJECTS;
+}
+
+function normalizeScoreComponents(value: unknown) {
+  const raw = parseSetting<unknown>(value, null);
+  if (!Array.isArray(raw)) return SCORE_COMPONENTS;
+  const components = raw
+    .map((item) => {
+      if (typeof item === "string") {
+        const field = item.trim();
+        return field ? { field, label: field, max: 100, group: "class_group" } : null;
+      }
+      if (!item || typeof item !== "object") return null;
+      const record = item as Record<string, unknown>;
+      const field = String(record.field ?? record.label ?? "").trim();
+      if (!field) return null;
+      return {
+        field,
+        label: String(record.label ?? field).trim(),
+        max: Number(record.max ?? 0),
+        group: String(record.group ?? "class_group"),
+      };
+    })
+    .filter((item): item is ScoreComponent => Boolean(item));
+  return components.length ? components : SCORE_COMPONENTS;
+}
+
+function normalizeAssessmentGroups(value: unknown) {
+  const raw = parseSetting<unknown>(value, null);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return ASSESSMENT_GROUPS;
+  const groups = Object.fromEntries(
+    Object.entries(raw as Record<string, any>).map(([key, group]) => [
+      key,
+      {
+        name: String(group?.name ?? key),
+        weight: Number(group?.weight ?? 0),
+        components: Array.isArray(group?.components) ? group.components.map(String) : [],
+      },
+    ]),
+  ) as Record<string, AssessmentGroup>;
+  return Object.keys(groups).length ? groups : ASSESSMENT_GROUPS;
+}
+
+function normalizeGradingScale(value: unknown) {
+  const raw = parseSetting<unknown>(value, null);
+  if (!Array.isArray(raw)) return GRADING_SCALE;
+  const scale = raw
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const record = item as Record<string, unknown>;
+      return {
+        min: Number(record.min ?? 0),
+        max: Number(record.max ?? 0),
+        grade: (record.grade ?? "-") as number | string,
+        remark: String(record.remark ?? ""),
+      };
+    })
+    .filter((item): item is GradingScaleItem => Boolean(item));
+  return scale.length ? scale : GRADING_SCALE;
+}
+
 export function DataProvider({ children }: PropsWithChildren) {
   const { client, config } = useSupabase();
   const [session, setSessionState] = useState<SessionContext>({
@@ -52,6 +127,7 @@ export function DataProvider({ children }: PropsWithChildren) {
     section: "A",
   });
   const [students, setStudents] = useState<Student[]>(demoStudents);
+  const [subjects, setSubjects] = useState<string[]>(SUBJECTS);
   const [scoreComponents, setScoreComponents] = useState<ScoreComponent[]>(SCORE_COMPONENTS);
   const [assessmentGroups, setAssessmentGroups] = useState<Record<string, AssessmentGroup>>(ASSESSMENT_GROUPS);
   const [gradingScale, setGradingScale] = useState<GradingScaleItem[]>(GRADING_SCALE);
@@ -67,8 +143,10 @@ export function DataProvider({ children }: PropsWithChildren) {
 
   const cacheKey = client ? makeDataCacheKey(session.school_id) : DEMO_CACHE_KEY;
 
-  const cache = useCallback(async (payload: Partial<Pick<DataContextValue, "students" | "scores" | "attendance" | "scoreComponents" | "assessmentGroups" | "gradingScale">>) => {
-    await AsyncStorage.setItem(cacheKey, JSON.stringify(payload));
+  const cache = useCallback(async (payload: Partial<Pick<DataContextValue, "students" | "subjects" | "scores" | "attendance" | "scoreComponents" | "assessmentGroups" | "gradingScale">>) => {
+    const raw = await AsyncStorage.getItem(cacheKey);
+    const previous = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+    await AsyncStorage.setItem(cacheKey, JSON.stringify({ ...previous, ...payload }));
   }, [cacheKey]);
 
   useEffect(() => {
@@ -78,6 +156,7 @@ export function DataProvider({ children }: PropsWithChildren) {
           setStudents(demoStudents);
           setScores(demoScores);
           setAttendance(demoAttendance);
+          setSubjects(SUBJECTS);
           setScoreComponents(SCORE_COMPONENTS);
           setAssessmentGroups(ASSESSMENT_GROUPS);
           setGradingScale(GRADING_SCALE);
@@ -92,11 +171,13 @@ export function DataProvider({ children }: PropsWithChildren) {
         students?: Student[];
         scores?: SubjectScore[];
         attendance?: AttendanceRecord[];
+        subjects?: string[];
         scoreComponents?: ScoreComponent[];
         assessmentGroups?: Record<string, AssessmentGroup>;
         gradingScale?: GradingScaleItem[];
       };
       if (cached.students?.length) setStudents(cached.students);
+      if (cached.subjects?.length) setSubjects(cached.subjects);
       if (cached.scoreComponents?.length) setScoreComponents(cached.scoreComponents);
       if (cached.assessmentGroups) setAssessmentGroups(cached.assessmentGroups);
       if (cached.gradingScale?.length) setGradingScale(cached.gradingScale);
@@ -193,7 +274,7 @@ export function DataProvider({ children }: PropsWithChildren) {
           .eq("term", activeSession.term),
         client
           .from("school_settings")
-          .select("score_components,assessment_groups,grading_scale,settings")
+          .select("subjects,score_components,assessment_groups,grading_scale,settings")
           .eq("school_id", activeSession.school_id)
           .maybeSingle(),
       ]);
@@ -207,13 +288,12 @@ export function DataProvider({ children }: PropsWithChildren) {
       })) as SubjectScore[];
       const nextAttendance = (attendanceRes.data ?? []) as AttendanceRecord[];
       const settings = settingsRes.data as any;
-      const rawComponents = parseSetting<unknown>(settings?.score_components ?? settings?.settings?.score_components, null);
-      const rawGroups = parseSetting<unknown>(settings?.assessment_groups ?? settings?.settings?.assessment_groups, null);
-      const rawGrading = parseSetting<unknown>(settings?.grading_scale ?? settings?.settings?.grading_scale, null);
-      const nextComponents = Array.isArray(rawComponents) && rawComponents.length ? rawComponents as ScoreComponent[] : SCORE_COMPONENTS;
-      const nextGroups = rawGroups && typeof rawGroups === "object" ? rawGroups as Record<string, AssessmentGroup> : ASSESSMENT_GROUPS;
-      const nextGrading = Array.isArray(rawGrading) && rawGrading.length ? rawGrading as GradingScaleItem[] : GRADING_SCALE;
+      const nextSubjects = normalizeSubjects(settings?.subjects ?? settings?.settings?.subjects);
+      const nextComponents = normalizeScoreComponents(settings?.score_components ?? settings?.settings?.score_components);
+      const nextGroups = normalizeAssessmentGroups(settings?.assessment_groups ?? settings?.settings?.assessment_groups);
+      const nextGrading = normalizeGradingScale(settings?.grading_scale ?? settings?.settings?.grading_scale);
       setStudents(nextStudents);
+      setSubjects(nextSubjects);
       setScoreComponents(nextComponents);
       setAssessmentGroups(nextGroups);
       setGradingScale(nextGrading);
@@ -222,7 +302,7 @@ export function DataProvider({ children }: PropsWithChildren) {
       setOnline(true);
       const syncedAt = nowISO();
       setLastSyncedAt(syncedAt);
-      await cache({ students: nextStudents, scoreComponents: nextComponents, assessmentGroups: nextGroups, gradingScale: nextGrading, scores: nextScores, attendance: nextAttendance });
+      await cache({ students: nextStudents, subjects: nextSubjects, scoreComponents: nextComponents, assessmentGroups: nextGroups, gradingScale: nextGrading, scores: nextScores, attendance: nextAttendance });
     } catch {
       setOnline(false);
     } finally {
@@ -391,6 +471,7 @@ export function DataProvider({ children }: PropsWithChildren) {
       session,
       setSession,
       students,
+      subjects,
       scoreComponents,
       assessmentGroups,
       gradingScale,
@@ -407,7 +488,7 @@ export function DataProvider({ children }: PropsWithChildren) {
       replaceAttendance,
       upsertScore,
     }),
-    [assessmentGroups, attendance, bulkAttendance, deleteStudent, gradingScale, isOnline, isSyncing, lastSyncedAt, refresh, replaceAttendance, saveStudent, scoreComponents, scores, session, setSession, students, upsertAttendance, upsertScore],
+    [assessmentGroups, attendance, bulkAttendance, deleteStudent, gradingScale, isOnline, isSyncing, lastSyncedAt, refresh, replaceAttendance, saveStudent, scoreComponents, scores, session, setSession, students, subjects, upsertAttendance, upsertScore],
   );
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

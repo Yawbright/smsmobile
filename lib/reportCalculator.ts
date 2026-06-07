@@ -27,6 +27,7 @@ type BuildReportInput = {
   scores: SubjectScore[];
   attendance: AttendanceRecord[];
   scoreComponents: ScoreComponent[];
+  subjects?: string[];
   assessmentGroups?: Record<string, AssessmentGroup>;
   gradingScale?: GradingScaleItem[];
 };
@@ -36,10 +37,11 @@ export function buildStudentReportPreview({
   scores,
   attendance,
   scoreComponents,
+  subjects = SUBJECTS,
   assessmentGroups = ASSESSMENT_GROUPS,
   gradingScale = GRADING_SCALE,
 }: BuildReportInput): StudentReportPreview {
-  const subjectRows = SUBJECTS.map((subject) => {
+  const subjectRows = subjects.map((subject) => {
     const scoreRecord = scores.find((item) => item.student_id === student.student_id && item.subject === subject);
     return calculateSubjectRow(subject, scoreRecord, scoreComponents, assessmentGroups, gradingScale);
   });

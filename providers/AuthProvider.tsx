@@ -5,6 +5,7 @@ import { createContext, PropsWithChildren, useContext, useEffect, useMemo, useSt
 import { Platform } from "react-native";
 
 import { useSupabase } from "./SupabaseProvider";
+import { makeDataCacheKey } from "../lib/cacheKeys";
 import { demoUser } from "../lib/demoData";
 import { MobileUser } from "../types";
 
@@ -80,6 +81,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
           return { ok: false, message: error?.message ?? "Login failed." };
         }
         const nextUser = data as MobileUser;
+        await AsyncStorage.removeItem(makeDataCacheKey(config.schoolId));
         setUser(nextUser);
         await setStoredUser(nextUser);
         router.replace("/(app)/home");

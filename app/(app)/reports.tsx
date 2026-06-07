@@ -1,17 +1,22 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { SelectMenu } from "../../components/SelectMenu";
 import { Card, EmptyState, SectionHeader } from "../../components/ui";
-import { SUBJECTS } from "../../constants/school";
 import { colors, radius, spacing } from "../../constants/theme";
 import { buildStudentReportPreview } from "../../lib/reportCalculator";
 import { useData } from "../../providers/DataProvider";
 
 export default function ReportsScreen() {
-  const { students, scores, attendance, session, scoreComponents, assessmentGroups, gradingScale } = useData();
+  const { students, subjects, scores, attendance, session, scoreComponents, assessmentGroups, gradingScale } = useData();
   const [selectedId, setSelectedId] = useState(students[0]?.student_id ?? "");
   const selected = students.find((student) => student.student_id === selectedId) ?? students[0];
+
+  useEffect(() => {
+    if (students.length && !students.some((student) => student.student_id === selectedId)) {
+      setSelectedId(students[0].student_id);
+    }
+  }, [selectedId, students]);
 
   const report = useMemo(() => {
     if (!selected) return null;
@@ -20,10 +25,11 @@ export default function ReportsScreen() {
       scores,
       attendance,
       scoreComponents,
+      subjects,
       assessmentGroups,
       gradingScale,
     });
-  }, [assessmentGroups, attendance, gradingScale, scoreComponents, scores, selected]);
+  }, [assessmentGroups, attendance, gradingScale, scoreComponents, scores, selected, subjects]);
 
   return (
     <ScrollView contentContainerStyle={styles.content}>
@@ -47,7 +53,7 @@ export default function ReportsScreen() {
               <Metric label="Total" value={report.subjectsScored ? String(report.total) : "No scores"} />
               <Metric label="Average" value={report.subjectsScored ? String(report.average) : "No scores"} />
               <Metric label="Attendance" value={report.attendanceTotal ? `${report.attendancePresent}/${report.attendanceTotal}` : "No marks"} />
-              <Metric label="Subjects" value={`${report.subjectsScored}/${SUBJECTS.length}`} />
+              <Metric label="Subjects" value={`${report.subjectsScored}/${subjects.length}`} />
             </View>
           </Card>
           <Card style={styles.table}>

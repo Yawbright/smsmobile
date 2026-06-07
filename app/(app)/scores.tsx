@@ -3,21 +3,31 @@ import { ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 import { SelectMenu, SelectRow } from "../../components/SelectMenu";
 import { Card, EmptyState, SectionHeader } from "../../components/ui";
-import { SUBJECTS } from "../../constants/school";
 import { colors, radius, spacing } from "../../constants/theme";
 import { useData } from "../../providers/DataProvider";
+import { ScoreComponent } from "../../types";
 
 export default function ScoresScreen() {
-  const { students, scores, scoreComponents, upsertScore } = useData();
-  const [subject, setSubject] = useState("Mathematics");
+  const { students, subjects, scores, scoreComponents, upsertScore } = useData();
+  const [subject, setSubject] = useState(subjects[0] ?? "");
   const [field, setField] = useState(scoreComponents[0]?.field ?? "");
   const component = scoreComponents.find((item) => item.field === field) ?? scoreComponents[0];
 
+  useEffect(() => {
+    if (!subjects.includes(subject)) setSubject(subjects[0] ?? "");
+  }, [subject, subjects]);
+
+  useEffect(() => {
+    if (!scoreComponents.some((item) => item.field === field)) setField(scoreComponents[0]?.field ?? "");
+  }, [field, scoreComponents]);
+
   const byStudent = useMemo(() => {
     const map = new Map<string, number | undefined>();
-    scores.filter((item) => item.subject === subject).forEach((record) => map.set(record.student_id, record.scores?.[field]));
+    scores
+      .filter((item) => item.subject === subject)
+      .forEach((record) => map.set(record.student_id, component ? readScoreValue(record.scores, component) : undefined));
     return map;
-  }, [field, scores, subject]);
+  }, [component, scores, subject]);
 
   return (
     <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
@@ -29,7 +39,7 @@ export default function ScoresScreen() {
             compact
             label="Subject"
             value={subject}
-            options={SUBJECTS.map((item) => ({ label: item, value: item }))}
+            options={subjects.map((item) => ({ label: item, value: item }))}
             onChange={setSubject}
           />
           <SelectMenu
@@ -66,6 +76,21 @@ export default function ScoresScreen() {
       )}
     </ScrollView>
   );
+}
+
+function readScoreValue(scores: Record<string, number> | undefined, component: ScoreComponent) {
+  if (!scores) return undefined;
+  const keys = [
+    component.field,
+    component.label,
+    `${component.label} (${component.max})`,
+    `${component.field} (${component.max})`,
+  ];
+  for (const key of keys) {
+    const value = scores[key];
+    if (value !== undefined && value !== null) return Number(value);
+  }
+  return undefined;
 }
 
 function ScoreInput({ value, max, onSave }: { value: number | undefined; max: number; onSave: (value: number | null) => Promise<void> }) {

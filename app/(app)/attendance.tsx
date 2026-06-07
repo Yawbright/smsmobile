@@ -51,9 +51,16 @@ function nextMark(mark: AttendanceMark) {
   return markCycle[(current + 1) % markCycle.length];
 }
 
+function termWeekForDate(date: string, termStart: string) {
+  const currentWeek = parseISODate(startOfWeek(date));
+  const firstWeek = parseISODate(termStart);
+  return Math.max(1, Math.floor((currentWeek.getTime() - firstWeek.getTime()) / 604800000) + 1);
+}
+
 export default function AttendanceScreen() {
   const { students, attendance, attendanceTermStartDates, session, upsertAttendance, replaceAttendance } = useData();
   const [termWeek, setTermWeek] = useState(1);
+  const [selectedDayIndex, setSelectedDayIndex] = useState(0);
   const [undoStack, setUndoStack] = useState<AttendanceRecord[][]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -64,6 +71,7 @@ export default function AttendanceScreen() {
   );
   const weekStart = useMemo(() => addDays(termWeekStart, (termWeek - 1) * 7), [termWeek, termWeekStart]);
   const weekDates = useMemo(() => weekLabels.map((_, index) => addDays(weekStart, index)), [weekStart]);
+  const selectedDate = weekDates[selectedDayIndex] ?? weekDates[0];
 
   const recordsByCell = useMemo(() => {
     const weekSet = new Set(weekDates);
@@ -83,9 +91,22 @@ export default function AttendanceScreen() {
     });
     return count;
   }, [recordsByCell]);
+  const selectedDayMarkedCount = useMemo(() => {
+    let count = 0;
+    recordsByCell.forEach((record) => {
+      if (record.mark && record.attendance_date === selectedDate) count += 1;
+    });
+    return count;
+  }, [recordsByCell, selectedDate]);
 
   useEffect(() => {
-    setTermWeek(1);
+    const currentTermWeek = termWeekForDate(todayISO(), termWeekStart);
+    const currentWeekStart = addDays(termWeekStart, (currentTermWeek - 1) * 7);
+    const currentWeekDates = weekLabels.map((_, index) => addDays(currentWeekStart, index));
+    setTermWeek(currentTermWeek);
+    const today = todayISO();
+    const todayIndex = currentWeekDates.indexOf(today);
+    setSelectedDayIndex(todayIndex >= 0 ? todayIndex : 0);
   }, [termKey, termWeekStart]);
 
   const shiftWeek = (weeks: number) => setTermWeek((current) => Math.max(1, current + weeks));
@@ -100,14 +121,12 @@ export default function AttendanceScreen() {
     }
   };
 
-  const markWeekPresent = async () => {
+  const markSelectedDay = async (mark: AttendanceMark) => {
     setBusy(true);
     setUndoStack((prev) => [...prev, attendance]);
     try {
       for (const student of students) {
-        for (const date of weekDates) {
-          await upsertAttendance(student.student_id, date, "P");
-        }
+        await upsertAttendance(student.student_id, selectedDate, mark);
       }
     } catch {
       setUndoStack((prev) => prev.slice(0, -1));
@@ -116,12 +135,14 @@ export default function AttendanceScreen() {
     }
   };
 
-  const clearWeek = async () => {
+  const clearSelectedDay = async () => {
     setBusy(true);
     setUndoStack((prev) => [...prev, attendance]);
     try {
       for (const record of Array.from(recordsByCell.values())) {
-        await upsertAttendance(record.student_id, record.attendance_date, "");
+        if (record.attendance_date === selectedDate) {
+          await upsertAttendance(record.student_id, record.attendance_date, "");
+        }
       }
     } catch {
       setUndoStack((prev) => prev.slice(0, -1));
@@ -154,11 +175,14 @@ export default function AttendanceScreen() {
           </Pressable>
         </View>
         <View style={styles.actionRow}>
-          <Pressable disabled={busy || !students.length} onPress={markWeekPresent} style={[styles.primaryButton, (busy || !students.length) && styles.disabled]}>
-            <Text style={styles.primaryText}>Mark week P</Text>
+          <Pressable disabled={busy || !students.length} onPress={() => markSelectedDay("P")} style={[styles.primaryButton, (busy || !students.length) && styles.disabled]}>
+            <Text style={styles.primaryText}>All present</Text>
           </Pressable>
-          <Pressable disabled={busy || !markedCount} onPress={clearWeek} style={[styles.secondaryButton, (busy || !markedCount) && styles.disabled]}>
-            <Text style={styles.secondaryText}>Clear week</Text>
+          <Pressable disabled={busy || !students.length} onPress={() => markSelectedDay("H")} style={[styles.holidayButton, (busy || !students.length) && styles.disabled]}>
+            <Text style={styles.holidayText}>All holiday</Text>
+          </Pressable>
+          <Pressable disabled={busy || !selectedDayMarkedCount} onPress={clearSelectedDay} style={[styles.secondaryButton, (busy || !selectedDayMarkedCount) && styles.disabled]}>
+            <Text style={styles.secondaryText}>Clear day</Text>
           </Pressable>
           <Pressable disabled={!undoStack.length} onPress={undo} style={[styles.secondaryButton, !undoStack.length && styles.disabled]}>
             <Text style={styles.secondaryText}>Undo</Text>
@@ -170,10 +194,14 @@ export default function AttendanceScreen() {
         <View style={styles.list}>
           <View style={styles.dayGridHeader}>
             {weekDates.map((date, index) => (
-              <View key={date} style={styles.dayHeader}>
-                <Text style={styles.headerText}>{weekLabels[index]}</Text>
-                <Text style={styles.dateHeader}>{shortDate(date)}</Text>
-              </View>
+              <Pressable
+                key={date}
+                onPress={() => setSelectedDayIndex(index)}
+                style={[styles.dayHeader, selectedDayIndex === index && styles.dayHeaderSelected]}
+              >
+                <Text style={[styles.headerText, selectedDayIndex === index && styles.headerTextSelected]}>{weekLabels[index]}</Text>
+                <Text style={[styles.dateHeader, selectedDayIndex === index && styles.dateHeaderSelected]}>{shortDate(date)}</Text>
+              </Pressable>
             ))}
           </View>
             {students.map((student) => (
@@ -192,6 +220,7 @@ export default function AttendanceScreen() {
                         onPress={() => markSingle(student.student_id, date)}
                         style={[
                           styles.markCell,
+                          selectedDayIndex === index && styles.markCellSelected,
                           style ? { backgroundColor: style.bg, borderColor: style.border } : null,
                         ]}
                       >
@@ -256,6 +285,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   secondaryText: { color: colors.text, fontSize: 13, fontWeight: "600" },
+  holidayButton: {
+    backgroundColor: "#FFF7ED",
+    borderColor: "#FDBA74",
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    justifyContent: "center",
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+  },
+  holidayText: { color: "#9A3412", fontSize: 13, fontWeight: "700" },
   disabled: { opacity: 0.45 },
   list: { gap: spacing.sm },
   dayGridHeader: { flexDirection: "row", gap: 4, paddingHorizontal: spacing.sm },
@@ -271,8 +310,11 @@ const styles = StyleSheet.create({
     minHeight: 42,
     minWidth: 0,
   },
+  dayHeaderSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
   headerText: { color: colors.text, fontSize: 12, fontWeight: "700" },
+  headerTextSelected: { color: "#FFFFFF" },
   dateHeader: { color: colors.muted, fontSize: 9, fontWeight: "500" },
+  dateHeaderSelected: { color: "#EAF2FF" },
   tableRow: { gap: spacing.sm, padding: spacing.sm },
   studentCell: { justifyContent: "center", minHeight: 34 },
   name: { color: colors.text, fontSize: 16, fontWeight: "700" },
@@ -289,6 +331,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     minWidth: 0,
   },
+  markCellSelected: { borderColor: colors.primary },
   markText: { color: colors.muted, fontSize: 15, fontWeight: "800" },
   placeholderText: { color: colors.muted, fontSize: 10, fontWeight: "700" },
 });

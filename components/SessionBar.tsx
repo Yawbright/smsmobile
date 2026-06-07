@@ -13,7 +13,7 @@ const years = [CURRENT_YEAR, "2024/2025", "2026/2027"];
 const COLLAPSE_KEY = "oterkpolu.mobile.filtersCollapsed";
 
 export function SessionBar() {
-  const { session, setSession, refresh } = useData();
+  const { session, setSession } = useData();
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -27,7 +27,6 @@ export function SessionBar() {
 
   const setAndRefresh = (next: Partial<typeof session>) => {
     setSession(next);
-    setTimeout(() => refresh(), 0);
   };
 
   if (collapsed) {

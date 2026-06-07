@@ -112,36 +112,93 @@ export function DataProvider({ children }: PropsWithChildren) {
     }
     setSyncing(true);
     try {
-      const [studentRes, scoreRes, attendanceRes, settingsRes] = await Promise.all([
-        client
+      let activeSession = session;
+      let studentRes = await client
+        .from("students")
+        .select("*")
+        .eq("school_id", activeSession.school_id)
+        .eq("academic_year", activeSession.academic_year)
+        .eq("grade", activeSession.grade)
+        .eq("section", activeSession.section)
+        .eq("is_deleted", false)
+        .order("student_name");
+      if (studentRes.error) throw studentRes.error;
+
+      if (!studentRes.data?.length) {
+        const fallbackByYear = await client
           .from("students")
           .select("*")
           .eq("school_id", session.school_id)
           .eq("academic_year", session.academic_year)
-          .eq("grade", session.grade)
-          .eq("section", session.section)
           .eq("is_deleted", false)
-          .order("student_name"),
+          .order("grade")
+          .order("section")
+          .order("student_name");
+        if (fallbackByYear.error) throw fallbackByYear.error;
+        const first = fallbackByYear.data?.[0];
+        if (first?.grade && first?.section) {
+          activeSession = { ...activeSession, grade: first.grade, section: first.section };
+          studentRes = {
+            ...fallbackByYear,
+            data: (fallbackByYear.data ?? []).filter((student: Student) => student.grade === first.grade && student.section === first.section),
+          };
+        }
+      }
+
+      if (!studentRes.data?.length) {
+        const fallbackAnyYear = await client
+          .from("students")
+          .select("*")
+          .eq("school_id", session.school_id)
+          .eq("is_deleted", false)
+          .order("academic_year", { ascending: false })
+          .order("grade")
+          .order("section")
+          .order("student_name");
+        if (fallbackAnyYear.error) throw fallbackAnyYear.error;
+        const first = fallbackAnyYear.data?.[0];
+        if (first?.academic_year && first?.grade && first?.section) {
+          activeSession = { ...activeSession, academic_year: first.academic_year, grade: first.grade, section: first.section };
+          studentRes = {
+            ...fallbackAnyYear,
+            data: (fallbackAnyYear.data ?? []).filter((student: Student) =>
+              student.academic_year === first.academic_year &&
+              student.grade === first.grade &&
+              student.section === first.section
+            ),
+          };
+        }
+      }
+
+      if (
+        activeSession.academic_year !== session.academic_year ||
+        activeSession.grade !== session.grade ||
+        activeSession.section !== session.section
+      ) {
+        setSessionState((prev) => ({ ...prev, ...activeSession }));
+      }
+
+      const [scoreRes, attendanceRes, settingsRes] = await Promise.all([
         client
           .from("student_scores")
           .select("*")
-          .eq("school_id", session.school_id)
-          .eq("academic_year", session.academic_year)
-          .eq("term", session.term),
+          .eq("school_id", activeSession.school_id)
+          .eq("academic_year", activeSession.academic_year)
+          .eq("term", activeSession.term),
         client
           .from("daily_attendance")
           .select("*")
-          .eq("school_id", session.school_id)
-          .eq("academic_year", session.academic_year)
-          .eq("term", session.term),
+          .eq("school_id", activeSession.school_id)
+          .eq("academic_year", activeSession.academic_year)
+          .eq("term", activeSession.term),
         client
           .from("school_settings")
           .select("score_components,assessment_groups,grading_scale,settings")
-          .eq("school_id", session.school_id)
+          .eq("school_id", activeSession.school_id)
           .maybeSingle(),
       ]);
-      if (studentRes.error || scoreRes.error || attendanceRes.error) {
-        throw studentRes.error ?? scoreRes.error ?? attendanceRes.error;
+      if (scoreRes.error || attendanceRes.error) {
+        throw scoreRes.error ?? attendanceRes.error;
       }
       const nextStudents = (studentRes.data ?? []) as Student[];
       const nextScores = (scoreRes.data ?? []).map((row: any) => ({

@@ -12,14 +12,14 @@ import {
   SupabaseRuntimeConfig,
 } from "../lib/supabase";
 import { DEMO_CACHE_KEY } from "../lib/cacheKeys";
-import { hasDirectoryConfig, lookupSchoolCode } from "../lib/schoolDirectory";
+import { hasDirectoryConfig, lookupSchoolCode, registerSchoolConfig } from "../lib/schoolDirectory";
 
 type SupabaseContextValue = {
   client: SupabaseClient | null;
   config: SupabaseRuntimeConfig;
   hasSupabaseConfig: boolean;
   isLoadingConfig: boolean;
-  saveConfig: (config: SupabaseRuntimeConfig) => Promise<void>;
+  saveConfig: (config: SupabaseRuntimeConfig) => Promise<{ config: SupabaseRuntimeConfig; message: string }>;
   clearConfig: () => Promise<void>;
   testConfig: (config: SupabaseRuntimeConfig) => Promise<{ ok: boolean; message: string }>;
   directoryReady: boolean;
@@ -71,17 +71,23 @@ export function SupabaseProvider({ children }: PropsWithChildren) {
       isLoadingConfig,
       directoryReady: hasDirectoryConfig(),
       async saveConfig(nextConfig) {
-        const cleaned = {
+        let cleaned: SupabaseRuntimeConfig = {
           supabaseUrl: nextConfig.supabaseUrl.trim(),
           supabaseAnonKey: nextConfig.supabaseAnonKey.trim(),
-          schoolId: nextConfig.schoolId.trim() || "default-school",
+          schoolId: nextConfig.schoolId.trim(),
           schoolName: nextConfig.schoolName?.trim() || "",
           schoolCode: nextConfig.schoolCode?.trim().toUpperCase() || "",
+          approvalStatus: nextConfig.approvalStatus ?? "pending",
         };
+
+        const result = await registerSchoolConfig(cleaned);
+        cleaned = result.config;
+        const message = `Registration submitted. School code: ${cleaned.schoolCode}. Status: ${result.status}.`;
+
         await AsyncStorage.removeItem(DEMO_CACHE_KEY);
         await saveStoredSupabaseConfig(cleaned);
-        await saveSchoolIdentity(cleaned);
         setConfig(cleaned);
+        return { config: cleaned, message };
       },
       async clearConfig() {
         await clearStoredSupabaseConfig();
@@ -91,7 +97,7 @@ export function SupabaseProvider({ children }: PropsWithChildren) {
         setConfig(envSupabaseConfig);
       },
       async testConfig(nextConfig) {
-        if (!hasConfig(nextConfig)) return { ok: false, message: "Enter URL, anon key and school ID." };
+        if (!nextConfig.supabaseUrl || !nextConfig.supabaseAnonKey) return { ok: false, message: "Enter URL and anon key." };
         try {
           const testClient = createSupabaseClient(nextConfig);
           const { error } = await testClient.rpc("mobile_login", {

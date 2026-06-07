@@ -16,7 +16,6 @@ export default function SetupScreen() {
   const [schoolCode, setSchoolCode] = useState("");
   const [supabaseUrl, setSupabaseUrl] = useState(config.supabaseUrl);
   const [supabaseAnonKey, setSupabaseAnonKey] = useState(config.supabaseAnonKey);
-  const [schoolId, setSchoolId] = useState(config.schoolId);
   const [schoolName, setSchoolName] = useState(config.schoolName ?? "");
   const [manualSchoolCode, setManualSchoolCode] = useState(config.schoolCode ?? "");
   const [message, setMessage] = useState("");
@@ -25,12 +24,11 @@ export default function SetupScreen() {
   const [sqlOpen, setSqlOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
 
-  const current = { supabaseUrl, supabaseAnonKey, schoolId, schoolName, schoolCode: manualSchoolCode };
+  const current = { supabaseUrl, supabaseAnonKey, schoolId: config.schoolId, schoolName, schoolCode: manualSchoolCode };
 
   useEffect(() => {
     setSupabaseUrl(config.supabaseUrl);
     setSupabaseAnonKey(config.supabaseAnonKey);
-    setSchoolId(config.schoolId);
     setSchoolName(config.schoolName ?? "");
     setManualSchoolCode(config.schoolCode ?? "");
   }, [config]);
@@ -56,19 +54,26 @@ export default function SetupScreen() {
 
   const save = async () => {
     setBusy(true);
-    await saveConfig(current);
-    setOk(true);
-    setMessage("Saved. You can sign in with Supabase now.");
-    notify("Supabase setup saved.", "success");
-    setBusy(false);
-    router.replace("/login");
+    try {
+      const result = await saveConfig(current);
+      setManualSchoolCode(result.config.schoolCode ?? "");
+      setOk(true);
+      setMessage(result.message);
+      notify(result.message, "success");
+      setBusy(false);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Supabase setup failed.";
+      setOk(false);
+      setMessage(errorMessage);
+      notify(errorMessage, "error");
+      setBusy(false);
+    }
   };
 
   const reset = async () => {
     await clearConfig();
     setSupabaseUrl("");
     setSupabaseAnonKey("");
-    setSchoolId("default-school");
     setManualSchoolCode("");
     setMessage("Saved setup cleared.");
     setOk(false);
@@ -121,10 +126,14 @@ export default function SetupScreen() {
             {adminOpen ? (
               <View style={styles.adminBody}>
                 <Field label="School name" value={schoolName} onChangeText={setSchoolName} placeholder="Oterkpolu School" />
-                <Field label="School code" value={manualSchoolCode} onChangeText={setManualSchoolCode} placeholder="OTERK-7F3K" />
                 <Field label="Supabase URL" value={supabaseUrl} onChangeText={setSupabaseUrl} placeholder="https://your-project.supabase.co" />
                 <Field label="Anon key" value={supabaseAnonKey} onChangeText={setSupabaseAnonKey} placeholder="public anon key" multiline />
-                <Field label="School ID" value={schoolId} onChangeText={setSchoolId} placeholder="default-school" />
+                <View style={styles.resultBox}>
+                  <Text style={styles.resultLabel}>School code</Text>
+                  <Text selectable style={styles.resultValue}>{manualSchoolCode || "Generated after registration"}</Text>
+                  {manualSchoolCode ? <Text style={styles.resultSub}>Status: {config.approvalStatus ?? "pending"}</Text> : null}
+                </View>
+                {!directoryReady ? <Text style={styles.helpText}>Central directory is not configured in this app build, so a new teacher code cannot be registered here yet.</Text> : null}
                 <View style={styles.actions}>
                   <Pressable disabled={busy} onPress={test} style={[styles.secondaryButton, busy && styles.disabled]}>
                     {busy ? <ActivityIndicator color={colors.primary} /> : <Text style={styles.secondaryText}>Test</Text>}
@@ -259,6 +268,17 @@ const styles = StyleSheet.create({
   adminSub: { color: colors.muted, fontSize: 12, marginTop: 2 },
   field: { marginBottom: spacing.md },
   label: { color: colors.muted, fontSize: 12, fontWeight: "600", marginBottom: spacing.xs, textTransform: "uppercase" },
+  resultBox: {
+    backgroundColor: colors.panel,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    marginBottom: spacing.md,
+    padding: spacing.md,
+  },
+  resultLabel: { color: colors.muted, fontSize: 12, fontWeight: "600", marginBottom: spacing.xs, textTransform: "uppercase" },
+  resultValue: { color: colors.text, fontSize: 17, fontWeight: "700" },
+  resultSub: { color: colors.warning, fontSize: 12, marginTop: spacing.xs },
   input: {
     backgroundColor: colors.panel,
     borderColor: colors.border,

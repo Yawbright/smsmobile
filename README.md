@@ -25,12 +25,10 @@ Copy-Item .env.example .env
 Then fill in:
 
 ```text
-EXPO_PUBLIC_SUPABASE_URL=
-EXPO_PUBLIC_SUPABASE_ANON_KEY=
-EXPO_PUBLIC_SCHOOL_ID=
-EXPO_PUBLIC_DIRECTORY_SUPABASE_URL=
-EXPO_PUBLIC_DIRECTORY_SUPABASE_ANON_KEY=
+EXPO_PUBLIC_DIRECTORY_API_URL=
 ```
+
+For local native testing, point this to the deployed Vercel app. For Vercel web, the app uses same-origin `/api` automatically.
 
 Run the app:
 
@@ -68,14 +66,24 @@ If this folder is pushed as its own GitHub repository, leave the Vercel root dir
 mobile/oterkpolu-mobile
 ```
 
-Add these environment variables in Vercel before deploying:
+Add these server-side central directory environment variables in Vercel before deploying:
 
 ```text
-EXPO_PUBLIC_SUPABASE_URL
-EXPO_PUBLIC_SUPABASE_ANON_KEY
-EXPO_PUBLIC_SCHOOL_ID
-EXPO_PUBLIC_DIRECTORY_SUPABASE_URL
-EXPO_PUBLIC_DIRECTORY_SUPABASE_ANON_KEY
+CENTRAL_SUPABASE_URL
+CENTRAL_SUPABASE_ANON_KEY
+CENTRAL_SUPABASE_SERVICE_ROLE_KEY
+ADMIN_PASSWORD
+ADMIN_SESSION_SECRET
+```
+
+Do not add each school's own Supabase URL/key to Vercel. Schools enter their own Supabase values during setup.
+
+For first-time school onboarding, the school admin enters the school name, school Supabase URL, and school Supabase anon key in the mobile setup screen. The Vercel API registers the school in the central directory, returns a teacher access code, and marks the school as pending until central approval.
+
+Desktop installs use the same Vercel API for school-code lookup. Configure the desktop app environment with:
+
+```text
+OTERKPOLU_DIRECTORY_API_URL=https://your-vercel-app.vercel.app
 ```
 
 ## Supabase
@@ -84,3 +92,13 @@ The SQL setup files are included in:
 
 - `supabase_mobile.sql`
 - `supabase_central_directory.sql`
+
+## Developer Admin
+
+After deployment, open:
+
+```text
+https://your-vercel-app.vercel.app/admin
+```
+
+The admin dashboard uses `ADMIN_PASSWORD` for sign-in and server-side central Supabase credentials for school approvals, connection checks, and license generation.

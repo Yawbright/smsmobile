@@ -8,8 +8,7 @@ const extra = Constants.expoConfig?.extra as
       supabaseUrl?: string;
       supabaseAnonKey?: string;
       schoolId?: string;
-      directorySupabaseUrl?: string;
-      directorySupabaseAnonKey?: string;
+      directoryApiUrl?: string;
     }
   | undefined;
 
@@ -19,6 +18,7 @@ export type SupabaseRuntimeConfig = {
   schoolId: string;
   schoolName?: string;
   schoolCode?: string;
+  approvalStatus?: "pending" | "active" | "suspended" | "rejected";
 };
 
 export const SUPABASE_CONFIG_KEY = "oterkpolu.mobile.supabaseConfig";
@@ -29,13 +29,11 @@ export const envSupabaseConfig: SupabaseRuntimeConfig = {
   schoolId: process.env.EXPO_PUBLIC_SCHOOL_ID ?? extra?.schoolId ?? "default-school",
   schoolName: "",
   schoolCode: "",
+  approvalStatus: "active",
 };
 
-export const directorySupabaseUrl =
-  process.env.EXPO_PUBLIC_DIRECTORY_SUPABASE_URL ?? extra?.directorySupabaseUrl ?? "";
-
-export const directorySupabaseAnonKey =
-  process.env.EXPO_PUBLIC_DIRECTORY_SUPABASE_ANON_KEY ?? extra?.directorySupabaseAnonKey ?? "";
+export const directoryApiUrl =
+  process.env.EXPO_PUBLIC_DIRECTORY_API_URL ?? extra?.directoryApiUrl ?? "";
 
 export function hasConfig(config: SupabaseRuntimeConfig | null | undefined) {
   return Boolean(config?.supabaseUrl && config?.supabaseAnonKey && config?.schoolId);

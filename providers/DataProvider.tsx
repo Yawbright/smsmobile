@@ -21,7 +21,9 @@ type DataContextValue = {
   isOnline: boolean;
   isSyncing: boolean;
   lastSyncedAt: string | null;
+  lastSyncError: string | null;
   refresh: () => Promise<void>;
+  seedDemoData: () => Promise<void>;
   saveStudent: (draft: StudentDraft) => Promise<Student>;
   deleteStudent: (studentId: string) => Promise<void>;
   upsertAttendance: (studentId: string, date: string, mark: AttendanceMark) => Promise<void>;
@@ -45,7 +47,7 @@ function parseSetting<T>(value: unknown, fallback: T): T {
 
 function normalizeSubjects(value: unknown) {
   const raw = parseSetting<unknown>(value, null);
-  if (!Array.isArray(raw)) return SUBJECTS;
+  if (!Array.isArray(raw)) return [];
   const subjects = raw
     .map((item) => {
       if (typeof item === "string") return item.trim();
@@ -56,12 +58,12 @@ function normalizeSubjects(value: unknown) {
       return "";
     })
     .filter(Boolean);
-  return subjects.length ? subjects : SUBJECTS;
+  return subjects;
 }
 
 function normalizeScoreComponents(value: unknown) {
   const raw = parseSetting<unknown>(value, null);
-  if (!Array.isArray(raw)) return SCORE_COMPONENTS;
+  if (!Array.isArray(raw)) return [];
   const components = raw
     .map((item) => {
       if (typeof item === "string") {
@@ -80,12 +82,12 @@ function normalizeScoreComponents(value: unknown) {
       };
     })
     .filter((item): item is ScoreComponent => Boolean(item));
-  return components.length ? components : SCORE_COMPONENTS;
+  return components;
 }
 
 function normalizeAssessmentGroups(value: unknown) {
   const raw = parseSetting<unknown>(value, null);
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return ASSESSMENT_GROUPS;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const groups = Object.fromEntries(
     Object.entries(raw as Record<string, any>).map(([key, group]) => [
       key,
@@ -96,12 +98,12 @@ function normalizeAssessmentGroups(value: unknown) {
       },
     ]),
   ) as Record<string, AssessmentGroup>;
-  return Object.keys(groups).length ? groups : ASSESSMENT_GROUPS;
+  return groups;
 }
 
 function normalizeGradingScale(value: unknown) {
   const raw = parseSetting<unknown>(value, null);
-  if (!Array.isArray(raw)) return GRADING_SCALE;
+  if (!Array.isArray(raw)) return [];
   const scale = raw
     .map((item) => {
       if (!item || typeof item !== "object") return null;
@@ -114,7 +116,7 @@ function normalizeGradingScale(value: unknown) {
       };
     })
     .filter((item): item is GradingScaleItem => Boolean(item));
-  return scale.length ? scale : GRADING_SCALE;
+  return scale;
 }
 
 export function DataProvider({ children }: PropsWithChildren) {
@@ -126,16 +128,17 @@ export function DataProvider({ children }: PropsWithChildren) {
     grade: "JHS 1",
     section: "A",
   });
-  const [students, setStudents] = useState<Student[]>(demoStudents);
-  const [subjects, setSubjects] = useState<string[]>(SUBJECTS);
-  const [scoreComponents, setScoreComponents] = useState<ScoreComponent[]>(SCORE_COMPONENTS);
-  const [assessmentGroups, setAssessmentGroups] = useState<Record<string, AssessmentGroup>>(ASSESSMENT_GROUPS);
-  const [gradingScale, setGradingScale] = useState<GradingScaleItem[]>(GRADING_SCALE);
-  const [scores, setScores] = useState<SubjectScore[]>(demoScores);
-  const [attendance, setAttendance] = useState<AttendanceRecord[]>(demoAttendance);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [subjects, setSubjects] = useState<string[]>([]);
+  const [scoreComponents, setScoreComponents] = useState<ScoreComponent[]>([]);
+  const [assessmentGroups, setAssessmentGroups] = useState<Record<string, AssessmentGroup>>({});
+  const [gradingScale, setGradingScale] = useState<GradingScaleItem[]>([]);
+  const [scores, setScores] = useState<SubjectScore[]>([]);
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [isSyncing, setSyncing] = useState(false);
   const [isOnline, setOnline] = useState(Boolean(client));
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [lastSyncError, setLastSyncError] = useState<string | null>(null);
 
   useEffect(() => {
     setSessionState((prev) => ({ ...prev, school_id: config.schoolId }));
@@ -152,19 +155,13 @@ export function DataProvider({ children }: PropsWithChildren) {
   useEffect(() => {
     AsyncStorage.getItem(cacheKey).then((raw) => {
       if (!raw) {
-        if (!client) {
-          setStudents(demoStudents);
-          setScores(demoScores);
-          setAttendance(demoAttendance);
-          setSubjects(SUBJECTS);
-          setScoreComponents(SCORE_COMPONENTS);
-          setAssessmentGroups(ASSESSMENT_GROUPS);
-          setGradingScale(GRADING_SCALE);
-        } else {
-          setStudents([]);
-          setScores([]);
-          setAttendance([]);
-        }
+        setStudents([]);
+        setScores([]);
+        setAttendance([]);
+        setSubjects([]);
+        setScoreComponents([]);
+        setAssessmentGroups({});
+        setGradingScale([]);
         return;
       }
       const cached = JSON.parse(raw) as {
@@ -300,11 +297,13 @@ export function DataProvider({ children }: PropsWithChildren) {
       setScores(nextScores);
       setAttendance(nextAttendance);
       setOnline(true);
+      setLastSyncError(null);
       const syncedAt = nowISO();
       setLastSyncedAt(syncedAt);
       await cache({ students: nextStudents, subjects: nextSubjects, scoreComponents: nextComponents, assessmentGroups: nextGroups, gradingScale: nextGrading, scores: nextScores, attendance: nextAttendance });
-    } catch {
+    } catch (error) {
       setOnline(false);
+      setLastSyncError(error instanceof Error ? error.message : "Sync failed.");
     } finally {
       setSyncing(false);
     }
@@ -317,6 +316,27 @@ export function DataProvider({ children }: PropsWithChildren) {
   const setSession = useCallback((next: Partial<SessionContext>) => {
     setSessionState((prev) => ({ ...prev, ...next }));
   }, []);
+
+  const seedDemoData = useCallback(async () => {
+    if (client) return;
+    setStudents(demoStudents);
+    setSubjects(SUBJECTS);
+    setScoreComponents(SCORE_COMPONENTS);
+    setAssessmentGroups(ASSESSMENT_GROUPS);
+    setGradingScale(GRADING_SCALE);
+    setScores(demoScores);
+    setAttendance(demoAttendance);
+    setLastSyncError(null);
+    await cache({
+      students: demoStudents,
+      subjects: SUBJECTS,
+      scoreComponents: SCORE_COMPONENTS,
+      assessmentGroups: ASSESSMENT_GROUPS,
+      gradingScale: GRADING_SCALE,
+      scores: demoScores,
+      attendance: demoAttendance,
+    });
+  }, [cache, client]);
 
   const saveStudent = useCallback(
     async (draft: StudentDraft) => {
@@ -480,7 +500,9 @@ export function DataProvider({ children }: PropsWithChildren) {
       isOnline,
       isSyncing,
       lastSyncedAt,
+      lastSyncError,
       refresh,
+      seedDemoData,
       saveStudent,
       deleteStudent,
       upsertAttendance,
@@ -488,7 +510,7 @@ export function DataProvider({ children }: PropsWithChildren) {
       replaceAttendance,
       upsertScore,
     }),
-    [assessmentGroups, attendance, bulkAttendance, deleteStudent, gradingScale, isOnline, isSyncing, lastSyncedAt, refresh, replaceAttendance, saveStudent, scoreComponents, scores, session, setSession, students, subjects, upsertAttendance, upsertScore],
+    [assessmentGroups, attendance, bulkAttendance, deleteStudent, gradingScale, isOnline, isSyncing, lastSyncError, lastSyncedAt, refresh, replaceAttendance, saveStudent, scoreComponents, scores, seedDemoData, session, setSession, students, subjects, upsertAttendance, upsertScore],
   );
 
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;

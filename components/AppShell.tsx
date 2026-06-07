@@ -23,7 +23,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const wide = width >= 768;
   const pathname = usePathname();
   const { user, logout } = useAuth();
-  const { isOnline, isSyncing, lastSyncedAt } = useData();
+  const { isOnline, isSyncing, lastSyncedAt, lastSyncError } = useData();
 
   const statusText = isSyncing ? "Syncing" : isOnline ? "Online" : "Supabase needed";
 
@@ -67,6 +67,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Pressable>
           </View>
           <SessionBar />
+          {lastSyncError ? <Text style={styles.syncError}>{lastSyncError}</Text> : null}
           <View style={styles.body}>{children}</View>
           {lastSyncedAt ? <Text style={styles.lastSync}>Last sync {new Date(lastSyncedAt).toLocaleTimeString()}</Text> : null}
           {!wide ? (
@@ -146,6 +147,16 @@ const styles = StyleSheet.create({
     fontSize: 11,
     paddingRight: spacing.lg,
     textAlign: "right",
+  },
+  syncError: {
+    backgroundColor: "#FEF2F2",
+    borderBottomColor: "#FECACA",
+    borderBottomWidth: 1,
+    color: colors.danger,
+    fontSize: 12,
+    fontWeight: "500",
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
   },
   bottomNav: {
     backgroundColor: colors.card,

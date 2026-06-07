@@ -63,7 +63,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
           return { ok: false, message: "Enter username and password." };
         }
 
-        if (trimmed === DEMO_ADMIN_USERNAME && password === DEMO_ADMIN_PASSWORD) {
+        if (!hasSupabaseConfig && trimmed === DEMO_ADMIN_USERNAME && password === DEMO_ADMIN_PASSWORD) {
           setUser(demoUser);
           await setStoredUser(demoUser);
           router.replace("/(app)/home");
@@ -93,7 +93,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
         router.replace("/login");
       },
     }),
-    [client, config.schoolId, isDemoMode, isLoading, user],
+    [client, config.schoolId, hasSupabaseConfig, isDemoMode, isLoading, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

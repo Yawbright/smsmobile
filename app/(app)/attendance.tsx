@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 
 import { Card, Chip, EmptyState, SectionHeader } from "../../components/ui";
@@ -17,6 +17,7 @@ const marks: { mark: AttendanceMark; label: string }[] = [
 export default function AttendanceScreen() {
   const { students, attendance, upsertAttendance, bulkAttendance, replaceAttendance } = useData();
   const [date, setDate] = useState(todayISO());
+  const autoPickedDate = useRef(false);
   const [undoStack, setUndoStack] = useState<AttendanceRecord[][]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -24,6 +25,20 @@ export default function AttendanceScreen() {
     const map = new Map<string, AttendanceRecord>();
     attendance.filter((record) => record.attendance_date === date).forEach((record) => map.set(record.student_id, record));
     return map;
+  }, [attendance, date]);
+
+  useEffect(() => {
+    if (autoPickedDate.current || !attendance.length) return;
+    if (attendance.some((record) => record.attendance_date === date)) return;
+    const latestDate = attendance
+      .map((record) => record.attendance_date)
+      .filter(Boolean)
+      .sort()
+      .at(-1);
+    if (latestDate) {
+      autoPickedDate.current = true;
+      setDate(latestDate);
+    }
   }, [attendance, date]);
 
   const shiftDate = (days: number) => {

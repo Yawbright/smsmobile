@@ -8,11 +8,13 @@ import { colors, radius, shadow, spacing } from "../constants/theme";
 import { useAuth } from "../providers/AuthProvider";
 import { useNotification } from "../providers/NotificationProvider";
 import { useSupabase } from "../providers/SupabaseProvider";
+import { useData } from "../providers/DataProvider";
 
 export default function LoginScreen() {
   const { login } = useAuth();
   const { notify } = useNotification();
   const { config, hasSupabaseConfig, directoryReady, setupWithSchoolCode } = useSupabase();
+  const { seedDemoData } = useData();
   const [username, setUsername] = useState("admin");
   const [password, setPassword] = useState("admin123");
   const [schoolCode, setSchoolCode] = useState(config.schoolCode ?? "");
@@ -39,6 +41,13 @@ export default function LoginScreen() {
     const result = await login(username, password);
     if (!result.ok) setMessage(result.message ?? "Could not sign in.");
     setBusy(false);
+  };
+
+  const addDemoData = async () => {
+    await seedDemoData();
+    const nextMessage = "Demo data added on this device.";
+    setMessage(nextMessage);
+    notify(nextMessage, "success");
   };
 
   return (
@@ -70,7 +79,15 @@ export default function LoginScreen() {
             </View>
             {!directoryReady ? <Text style={styles.hint}>School-code directory is not configured in this app build.</Text> : null}
           </View>
-          {!hasSupabaseConfig ? <Text style={styles.demo}>Enter your school code before signing in, or use the demo admin developer override.</Text> : null}
+          {!hasSupabaseConfig ? (
+            <View style={styles.demoBox}>
+              <Text style={styles.demo}>Enter your school code before signing in. For testing, add local demo data and use the demo admin login.</Text>
+              <Pressable onPress={addDemoData} style={styles.demoButton}>
+                <Ionicons name="flask-outline" size={17} color={colors.primary} />
+                <Text style={styles.demoButtonText}>Add demo data</Text>
+              </Pressable>
+            </View>
+          ) : null}
           <View style={styles.field}>
             <Text style={styles.label}>Username</Text>
             <TextInput autoCapitalize="none" value={username} onChangeText={setUsername} style={styles.input} placeholder="teacher username" />
@@ -116,17 +133,18 @@ const styles = StyleSheet.create({
   },
   title: { color: colors.text, fontSize: 28, fontWeight: "600", marginTop: spacing.lg },
   sub: { color: colors.muted, fontSize: 15, fontWeight: "400", marginBottom: spacing.lg },
-  demo: {
+  demoBox: {
     backgroundColor: "#FFFBEB",
     borderColor: "#FDE68A",
     borderRadius: radius.sm,
     borderWidth: 1,
-    color: colors.text,
-    fontSize: 13,
-    fontWeight: "400",
+    gap: spacing.sm,
     marginBottom: spacing.lg,
     padding: spacing.md,
   },
+  demo: { color: colors.text, fontSize: 13, fontWeight: "400" },
+  demoButton: { alignItems: "center", flexDirection: "row", gap: spacing.xs, minHeight: 34 },
+  demoButtonText: { color: colors.primary, fontWeight: "600" },
   schoolBox: {
     backgroundColor: colors.panel,
     borderColor: colors.border,
